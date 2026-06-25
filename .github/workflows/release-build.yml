@@ -1,0 +1,43 @@
+name: Release Build
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and upload binaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: kluster/go.mod
+          cache: true
+
+      - name: Build binaries
+        run: |
+          mkdir -p dist
+          for GOOS in linux darwin; do
+            for GOARCH in amd64 arm64; do
+              GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 go build \
+                -ldflags="-s -w -X github.com/bytepunx/kluster/cmd.Version=${{ github.ref_name }}" \
+                -o dist/kluster-${GOOS}-${GOARCH} \
+                ./kluster
+            done
+          done
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum * > checksums.txt
+          cat checksums.txt
+
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload ${{ github.ref_name }} dist/*

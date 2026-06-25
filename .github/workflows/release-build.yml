@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to build and upload (e.g. v1.0.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -12,8 +18,12 @@ jobs:
   build:
     name: Build and upload binaries
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version || github.ref }}
 
       - uses: actions/setup-go@v5
         with:
@@ -26,7 +36,7 @@ jobs:
           for GOOS in linux darwin; do
             for GOARCH in amd64 arm64; do
               GOOS=$GOOS GOARCH=$GOARCH CGO_ENABLED=0 go build \
-                -ldflags="-s -w -X github.com/bytepunx/kluster/cmd.Version=${{ github.ref_name }}" \
+                -ldflags="-s -w -X github.com/bytepunx/kluster/cmd.Version=${VERSION}" \
                 -o dist/kluster-${GOOS}-${GOARCH} \
                 ./kluster
             done
@@ -41,4 +51,4 @@ jobs:
       - name: Upload to release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload ${{ github.ref_name }} dist/*
+        run: gh release upload ${VERSION} dist/*

@@ -15,6 +15,10 @@ jobs:
     steps:
       - uses: googleapis/release-please-action@v4
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          # Use a PAT so the action can open PRs regardless of org policy.
+          # Create a classic token at github.com/settings/tokens (repo scope)
+          # and store it as the RELEASE_PLEASE_TOKEN repository secret.
+          # Fall back to GITHUB_TOKEN if the secret is absent (e.g. forks).
+          token: ${{ secrets.RELEASE_PLEASE_TOKEN || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

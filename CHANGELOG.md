@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/bytepunx/kluster/compare/v1.0.0...v1.0.1) (2026-06-30)
+
+
+### Bug Fixes
+
+* correct argocd addon routing and readiness checks ([1b056f0](https://github.com/bytepunx/kluster/commit/1b056f052ae37a0cfbd4aac125cb133869dd1e0d))
+
 ## 1.0.0 (2026-06-25)
 
 

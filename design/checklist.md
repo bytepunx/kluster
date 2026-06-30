@@ -57,7 +57,7 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 | `grafana` | ✅ | grafana/grafana; pre-wired Prometheus + Loki + Tempo datasources |
 | `loki` | ✅ | grafana/loki single-binary, no persistence, polls StatefulSet |
 | `tempo` | ✅ | grafana/tempo single-binary, local storage, polls StatefulSet |
-| `argocd` | ✅ | Helm install (argoproj.github.io/argo-helm); bcrypt admin password generated at install time; Traefik IngressRoute at `argocd.<trust-domain>`; disables built-in Dex; opt-in addon |
+| `argocd` | ✅ | Helm install (argoproj.github.io/argo-helm); bcrypt admin password generated at install time; Traefik IngressRoute at `argocd.<trust-domain>`; disables built-in Dex; opt-in addon. `Ready()` polls `argocd-server` + `argocd-repo-server` Deployments and `argocd-application-controller` StatefulSet. Helm install timeout 15 min. **Known limitation:** IngressRoute exposes HTTP port 80 only; ArgoCD CLI gRPC requires `--plaintext --port-forward` workaround. |
 
 ---
 
@@ -180,7 +180,7 @@ kluster up --profile signet --addon argocd --name dev-gitops
 - `Requires() []string` → `["traefik-tls"]` (needs Traefik IngressRoute CRDs + the default cert)
 - Add `argocd` entry to `versions.Catalog` (repo: `https://argoproj.github.io/argo-helm`, chart: `argo-cd`)
 - Helm values: disable built-in Dex (OIDC handled by the `dex` addon if present), single-replica server, pre-set bcrypt admin password hash
-- `Ready()`: poll `argocd-server` Deployment for `ReadyReplicas >= 1`
+- `Ready()`: poll `argocd-server` Deployment, `argocd-repo-server` Deployment, and `argocd-application-controller` StatefulSet for `ReadyReplicas >= 1`
 
 ---
 

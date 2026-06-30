@@ -40,8 +40,6 @@ global:
 
 server:
   replicas: 1
-  # Traefik terminates TLS; ArgoCD runs insecure internally.
-  insecure: true
 
 configs:
   params:
@@ -107,6 +105,7 @@ func (*ArgoCDAddon) Install(ctx context.Context, h ClusterHandle) error {
 		ValuesYaml:      argoCDValues(h.Config.TrustDomain, string(hash)),
 		WaitStrategy:    "legacy",
 		DryRunStrategy:  helmaction.DryRunNone,
+		Timeout:         15 * time.Minute,
 	}, nil)
 	if err != nil {
 		return fmt.Errorf("argocd: helm install: %w", err)
@@ -141,18 +140,37 @@ spec:
 }
 
 func (*ArgoCDAddon) Ready(ctx context.Context, h ClusterHandle) error {
-	// Wait for argocd-server to have at least one ready replica. The other
-	// components (repo-server, redis, application-controller) typically come up
-	// first; the server is the meaningful user-facing readiness signal.
+	deployments := []string{
+		argoCDRelease + "-server",
+		argoCDRelease + "-repo-server",
+	}
+	for _, name := range deployments {
+		name := name
+		if err := wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true,
+			func(ctx context.Context) (bool, error) {
+				d, err := h.K8sClient.AppsV1().Deployments(argoCDNamespace).Get(
+					ctx, name, metav1.GetOptions{},
+				)
+				if err != nil {
+					return false, nil
+				}
+				return d.Status.ReadyReplicas >= 1, nil
+			},
+		); err != nil {
+			return fmt.Errorf("argocd: waiting for deployment %s: %w", name, err)
+		}
+	}
+
+	// application-controller is a StatefulSet, not a Deployment.
 	return wait.PollUntilContextTimeout(ctx, 5*time.Second, 10*time.Minute, true,
 		func(ctx context.Context) (bool, error) {
-			d, err := h.K8sClient.AppsV1().Deployments(argoCDNamespace).Get(
-				ctx, argoCDRelease+"-server", metav1.GetOptions{},
+			ss, err := h.K8sClient.AppsV1().StatefulSets(argoCDNamespace).Get(
+				ctx, argoCDRelease+"-application-controller", metav1.GetOptions{},
 			)
 			if err != nil {
 				return false, nil
 			}
-			return d.Status.ReadyReplicas >= 1, nil
+			return ss.Status.ReadyReplicas >= 1, nil
 		},
 	)
 }

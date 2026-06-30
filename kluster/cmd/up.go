@@ -37,7 +37,8 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		Name:        name,
 		K3sVersion:  stringFlag(cmd, "k3s-version", "k3s-version"),
 		TrustDomain: stringFlag(cmd, "trust-domain", "trust-domain"),
-		Profiles:    append([]string{profile}, addons...),
+		Profiles:    []string{profile},
+		Addons:      addons,
 	}
 	p, err := resolveProvider()
 	if err != nil {

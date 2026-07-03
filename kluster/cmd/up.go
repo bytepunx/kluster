@@ -20,7 +20,7 @@ var upCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(upCmd)
 	upCmd.Flags().String("name", "", "Cluster name")
-	upCmd.Flags().String("profile", "signet", "Profile to activate: signet, authstar")
+	upCmd.Flags().String("profile", "spire", "Profile to activate: spire, authstar")
 	upCmd.Flags().StringArray("addon", nil, "Additional opt-in addons: observability, tracing. Repeatable.")
 	upCmd.Flags().String("trust-domain", "dev.cluster.local", "SPIFFE trust domain")
 	upCmd.Flags().String("k3s-version", "", "k3s version tag (default: latest stable)")

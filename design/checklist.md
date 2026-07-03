@@ -67,7 +67,7 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 |---|---|---|
 | `Profile` interface | ✅ | `profile/profile.go` |
 | Registry (`Register` / `Get` / `All`) | ✅ | `profile/profile.go` |
-| `signet` | ✅ | Applies ClusterSPIFFEID `kluster-workload` via SSA; trust domain from config |
+| `spire` | ✅ | SPIFFE/SPIRE workload identity (not Signet itself — see `signet` in Upcoming Features). Applies ClusterSPIFFEID `kluster-workload` via SSA; trust domain from config |
 | `authstar` | ✅ | no-op Configure (pre-seeded via Helm values); note for future RabbitMQ/Dex wiring |
 | `observability` | ✅ | prometheus + grafana; registered via init() |
 | `tracing` | ✅ | loki + tempo; registered via init() |
@@ -123,6 +123,13 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 
 ## Upcoming Features
 
+### `signet` profile ⬜
+
+Installs Signet itself, on top of the `spire` profile, using Signet's own Helm
+chart and installation instructions (see the `signet` repo's `deploy/helm/signet`
+chart and `docs/installation.md` / `docs/getting-started.md`). Not started —
+`authstar` currently depends on `spire` directly as a placeholder for this.
+
 ### Config file (`kluster.yaml`)
 
 A project-level YAML file users commit alongside their code. Eliminates the need to memorize or copy-paste flags across team members and CI scripts.
@@ -136,8 +143,8 @@ A project-level YAML file users commit alongside their code. Eliminates the need
 
 ```yaml
 # kluster.yaml
-name: dev-signet
-profile: signet
+name: dev-spire
+profile: spire
 provider: k3d
 trust-domain: dev.cluster.local
 addons:
@@ -172,7 +179,7 @@ Installs ArgoCD as an opt-in addon, pre-configured for local GitOps workflow tes
 
 **Usage:**
 ```bash
-kluster up --profile signet --addon argocd --name dev-gitops
+kluster up --profile spire --addon argocd --name dev-gitops
 ```
 
 **Implementation:**

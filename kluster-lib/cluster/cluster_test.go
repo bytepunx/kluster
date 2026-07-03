@@ -139,16 +139,16 @@ func TestTopoSort_UnknownAddon(t *testing.T) {
 // ── resolveProfiles ─────────────────────────────────────────────────────────
 
 func TestResolveProfiles_DependencyOrder(t *testing.T) {
-	// authstar requires signet → signet must come first
+	// authstar requires spire → spire must come first
 	c := clusterWithProfiles(
-		&fakeProfile{name: "signet"},
-		&fakeProfile{name: "authstar", requires: []string{"signet"}},
+		&fakeProfile{name: "spire"},
+		&fakeProfile{name: "authstar", requires: []string{"spire"}},
 	)
 	order, err := c.resolveProfiles([]string{"authstar"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(order) != 2 || order[0] != "signet" || order[1] != "authstar" {
+	if len(order) != 2 || order[0] != "spire" || order[1] != "authstar" {
 		t.Errorf("unexpected order %v", order)
 	}
 }
@@ -167,13 +167,13 @@ func TestResolveProfiles_CycleDetected(t *testing.T) {
 // ── collectAddons ───────────────────────────────────────────────────────────
 
 func TestCollectAddons_Deduplication(t *testing.T) {
-	// signet: [cert-manager, spire]
-	// authstar: [rabbitmq]  (cert-manager already pulled in by signet)
+	// spire: [cert-manager, spire]
+	// authstar: [rabbitmq]  (cert-manager already pulled in by spire)
 	c := clusterWithProfiles(
-		&fakeProfile{name: "signet", addons: []string{"cert-manager", "spire"}},
+		&fakeProfile{name: "spire", addons: []string{"cert-manager", "spire"}},
 		&fakeProfile{name: "authstar", addons: []string{"rabbitmq"}},
 	)
-	names := c.collectAddons([]string{"signet", "authstar"}, []string{"cert-manager"})
+	names := c.collectAddons([]string{"spire", "authstar"}, []string{"cert-manager"})
 	want := []string{"cert-manager", "spire", "rabbitmq"}
 	if len(names) != len(want) {
 		t.Fatalf("got %v, want %v", names, want)

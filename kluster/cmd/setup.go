@@ -93,7 +93,7 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 
 	if allOK {
 		fmt.Fprintln(out)
-		fmt.Fprintln(out, "All prerequisites satisfied. Run 'kluster up --profile signet --name dev' to get started.")
+		fmt.Fprintln(out, "All prerequisites satisfied. Run 'kluster up --profile spire --name dev' to get started.")
 	}
 	return nil
 }

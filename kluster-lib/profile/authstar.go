@@ -13,8 +13,13 @@ var _ Profile = (*AuthStarProfile)(nil)
 
 func init() { Register(&AuthStarProfile{}) }
 
-func (*AuthStarProfile) Name() string               { return "authstar" }
-func (*AuthStarProfile) RequiresProfiles() []string { return []string{"signet"} }
+func (*AuthStarProfile) Name() string { return "authstar" }
+
+// RequiresProfiles depends on "spire" for workload identity. AuthStar's real
+// dependency is on Signet for secrets/config, but the "signet" profile (built
+// on Signet's own Helm chart) does not exist yet — swap this to "signet" once
+// it does.
+func (*AuthStarProfile) RequiresProfiles() []string { return []string{"spire"} }
 func (*AuthStarProfile) Addons() []string {
 	return []string{"rabbitmq", "dex"}
 }

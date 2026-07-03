@@ -17,18 +17,24 @@ A `kind` provider may be added later as a CI-optimized alternative.
 
 ## Key dependency projects
 
-### Signet
-Signet is a Kubernetes-native configuration and secrets management tool. It uses **SPIFFE SVIDs** as the caller identity signal: a workload presents its SVID to Signet, which validates the SPIFFE ID and maps it to an access policy to determine what config/secrets that workload may receive.
+### Signet vs. the `spire` profile — read this before touching either
 
-The `signet` profile in kluster-lib bootstraps everything Signet needs:
+**Signet** and **SPIRE** are two different things that are easy to conflate, and kluster's profile naming has historically made that worse:
+
+- **SPIRE** is the SPIFFE workload identity runtime (server, agent, controller manager). It issues SVIDs; it knows nothing about Signet.
+- **Signet** is the product built on top of SPIRE — it's Kubernetes-native configuration and secrets management that uses **SPIFFE SVIDs** as the caller identity signal: a workload presents its SVID to Signet, which validates the SPIFFE ID and maps it to an access policy to determine what config/secrets that workload may receive.
+
+kluster-lib's `spire` profile (`kluster-lib/profile/spire.go`) bootstraps the SPIFFE/SPIRE identity substrate — it does **not** install Signet itself:
 - SPIRE Server + Agent (DaemonSet)
 - SPIRE Controller Manager (for `ClusterSPIFFEID` CRD-driven registration)
 - cert-manager (TLS lifecycle)
 - Traefik with TLS termination via cert-manager integration
 - Trust domain: `dev.cluster.local` (configurable)
 
+A dedicated `signet` profile — installing Signet's own Helm chart on top of `spire`, per Signet's own installation docs — does not exist yet. This profile was previously (and confusingly) named `signet`; it was renamed to `spire` to leave room for a real `signet` profile later. Until that profile exists, do not reuse the name `signet` for anything other than the future Signet-chart profile.
+
 ### AuthStar
-AuthStar is a modular authentication, authorization, and subscription management platform. It depends on Signet for secrets and configuration. The `authstar` profile composes the `signet` profile as a dependency, then additionally installs:
+AuthStar is a modular authentication, authorization, and subscription management platform. It depends on Signet for secrets and configuration. Today the `authstar` profile composes the `spire` profile as a dependency (since there is no `signet` profile yet) — once one exists, `authstar` should depend on `signet` instead. `authstar` additionally installs:
 - RabbitMQ (single-node + management UI)
 - Dex (local OIDC provider for end-to-end OIDC flow testing)
 - AuthStar-specific Helm values and RBAC
@@ -38,7 +44,7 @@ AuthStar provides its own reverse proxy for ingress, so no additional ingress co
 ## Architecture layers
 
 ```
-Named Profiles          (authstar, signet, observability, tracing)
+Named Profiles          (authstar, spire, observability, tracing)
     ↓ composes
 Platform Addons         (spire, cert-manager, traefik-tls, rabbitmq, dex, ...)
     ↓ installs into
@@ -67,7 +73,7 @@ kluster/
 │   │   └── tracing.go            # Loki + Tempo
 │   ├── profile/
 │   │   ├── profile.go            # Profile interface + dependency graph
-│   │   ├── signet.go
+│   │   ├── spire.go              # SPIFFE/SPIRE workload identity (not Signet itself)
 │   │   ├── authstar.go
 │   │   ├── observability.go
 │   │   └── tracing.go
@@ -88,7 +94,7 @@ kluster/
 1. **No automation logic in the CLI.** The CLI parses flags, builds a `ClusterConfig`, delegates to `kluster-lib`, and renders output. Period.
 2. **No shelling out for core operations.** Cluster lifecycle uses the k3d Go library directly. Helm installs use the Helm Go SDK (`helm.sh/helm/v3`) via `go-helm-client`. Kubernetes resource management uses `client-go`.
 3. **Ordered addon installation.** Profiles declare addon dependencies explicitly. The library resolves a deterministic installation order (topological sort). Addons declare their own prerequisites.
-4. **SPIRE is not optional for Signet.** The `signet` profile unconditionally installs SPIRE with the SPIRE Controller Manager. Registration entries are managed via `ClusterSPIFFEID` CRDs, not manual `spire-server entry create` calls, to mirror production behavior.
+4. **SPIRE is not optional for Signet.** The `spire` profile unconditionally installs SPIRE with the SPIRE Controller Manager. Registration entries are managed via `ClusterSPIFFEID` CRDs, not manual `spire-server entry create` calls, to mirror production behavior.
 5. **SVID extraction must be testable.** The local SPIRE setup must support real SVID issuance and extraction — not mocked. Workload attestation uses Kubernetes Service Account Tokens (the standard local attestation method).
 
 ## Primary Go dependencies
@@ -106,11 +112,11 @@ kluster/
 ## CLI command surface
 
 ```bash
-kluster up --profile signet --name dev-signet
+kluster up --profile spire --name dev-spire
 kluster up --profile authstar --addon observability --name dev-authstar
 kluster down --name dev-authstar
 kluster status
-kluster kubeconfig --name dev-signet
+kluster kubeconfig --name dev-spire
 ```
 
 ## What is explicitly out of scope (for now)

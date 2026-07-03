@@ -74,7 +74,7 @@ The TypeScript ecosystem is strong for building workloads that run *inside* Kube
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Named Profiles                    │
-│         signet | authstar | observability           │
+│          spire | authstar | observability           │
 ├─────────────────────────────────────────────────────┤
 │               Platform Addons (opt-in)              │
 │   spire | cert-manager | traefik-tls | rabbitmq     │
@@ -96,7 +96,12 @@ The TypeScript ecosystem is strong for building workloads that run *inside* Kube
 
 **Profiles** are named compositions of addons. They declare which addons are required and provide profile-specific configuration (Helm values overrides, registration entries, scaffolded CRs). Profiles may depend on other profiles.
 
-**Named Profiles** are the user-facing entrypoints: `signet`, `authstar`, `observability`, `tracing`.
+**Named Profiles** are the user-facing entrypoints: `spire`, `authstar`, `observability`, `tracing`.
+
+> **Naming note:** `spire` installs SPIFFE/SPIRE workload identity — it is a
+> prerequisite for Signet, not Signet itself. This profile was originally
+> named `signet`, which conflated the two; it was renamed to `spire` to leave
+> room for a real `signet` profile (built on Signet's own Helm chart) later.
 
 ### Module structure
 
@@ -119,8 +124,8 @@ kluster/
 │   │   └── tracing.go            # Loki + Tempo
 │   ├── profile/
 │   │   ├── profile.go            # Profile interface + dependency resolver
-│   │   ├── signet.go             # Signet profile
-│   │   ├── authstar.go           # AuthStar profile (depends on signet)
+│   │   ├── spire.go              # SPIFFE/SPIRE workload identity profile
+│   │   ├── authstar.go           # AuthStar profile (depends on spire)
 │   │   ├── observability.go      # Observability opt-in profile
 │   │   └── tracing.go            # Tracing opt-in profile
 │   └── cluster/
@@ -217,7 +222,7 @@ A profile is a named composition of addons plus profile-specific post-install co
 ```go
 // profile/profile.go
 type Profile interface {
-    // Name returns the unique identifier for this profile (e.g. "signet").
+    // Name returns the unique identifier for this profile (e.g. "spire").
     Name() string
 
     // Requires returns the names of other profiles that must be installed first.
@@ -240,9 +245,9 @@ The `cluster` package resolves addon installation order via topological sort ove
 
 ## Profiles
 
-### `signet` profile
+### `spire` profile
 
-**Purpose:** Bootstraps everything required for Signet to operate. Signet uses SPIFFE SVIDs for caller identity, so the SPIRE stack must be fully functional with real SVID issuance before Signet itself is deployed.
+**Purpose:** Bootstraps SPIFFE/SPIRE workload identity — a prerequisite for Signet, but **not** Signet itself. Signet uses SPIFFE SVIDs for caller identity, so the SPIRE stack must be fully functional with real SVID issuance before Signet can be deployed on top of it. A dedicated `signet` profile that installs Signet's own Helm chart does not exist yet; this profile was previously named `signet`, which conflated the identity substrate with the product, and was renamed to `spire` to make room for a real `signet` profile later.
 
 **Addon stack (in installation order):**
 
@@ -264,11 +269,11 @@ The `cluster` package resolves addon installation order via topological sort ove
 
 ### `authstar` profile
 
-**Purpose:** Bootstraps everything required for AuthStar. AuthStar depends on Signet for secrets and configuration, so the `authstar` profile declares `signet` as a required profile.
+**Purpose:** Bootstraps everything required for AuthStar. AuthStar depends on Signet for secrets and configuration; until a dedicated `signet` profile exists, `authstar` declares `spire` as its required profile instead (the identity substrate Signet itself would depend on).
 
-**Required profiles:** `signet`
+**Required profiles:** `spire`
 
-**Additional addon stack (installed after signet addons):**
+**Additional addon stack (installed after spire addons):**
 
 1. `rabbitmq` — Single-node RabbitMQ with the management UI enabled. Deployed via the Bitnami Helm chart. Exposes management UI at a predictable local port.
 2. `dex` — Local OIDC provider for end-to-end OIDC flow testing. Configured with a static client matching AuthStar's expected OIDC client credentials.
@@ -358,7 +363,7 @@ The CLI is a thin Cobra application. It parses flags, constructs a `ClusterConfi
 ```
 kluster up [flags]
   --name        string   Cluster name (required)
-  --profile     string   Profile to activate: signet, authstar (default: signet)
+  --profile     string   Profile to activate: spire, authstar (default: spire)
   --addon       strings  Additional opt-in addons: observability, tracing
   --trust-domain string  SPIFFE trust domain (default: dev.cluster.local)
   --k3s-version string   k3s version tag (default: latest stable)
@@ -378,8 +383,8 @@ kluster kubeconfig [flags]
 ### Example invocations
 
 ```bash
-# Signet development cluster
-kluster up --name dev-signet --profile signet
+# SPIFFE/SPIRE workload identity development cluster
+kluster up --name dev-spire --profile spire
 
 # AuthStar development cluster with observability
 kluster up --name dev-authstar --profile authstar --addon observability
@@ -388,10 +393,10 @@ kluster up --name dev-authstar --profile authstar --addon observability
 kluster up --name dev-full --profile authstar --addon observability --addon tracing
 
 # Get kubeconfig merged into ~/.kube/config
-kluster kubeconfig --name dev-signet --merge
+kluster kubeconfig --name dev-spire --merge
 
 # Tear down
-kluster down --name dev-signet
+kluster down --name dev-spire
 
 # List all clusters
 kluster status

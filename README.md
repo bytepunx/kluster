@@ -5,7 +5,7 @@ kluster provisions disposable, fully-configured Kubernetes clusters for integrat
 Rather than shipping raw Helm values and install scripts, kluster provides named **profiles** that install and configure an opinionated, ready-to-use cluster in a single command:
 
 ```
-kluster up --profile signet --name dev-signet
+kluster up --profile spire --name dev-spire
 ```
 
 Two cluster runtimes are supported:
@@ -58,17 +58,17 @@ kluster setup
 k3d runs k3s inside Docker with no VM layer. It starts in seconds and is the default provider.
 
 ```bash
-# Bring up a full Signet stack
-kluster up --profile signet --name dev-signet
+# Bring up SPIFFE/SPIRE workload identity (a prerequisite for Signet)
+kluster up --profile spire --name dev-spire
 
 # Switch your local kubectl to the new cluster
-kluster use dev-signet
+kluster use dev-spire
 
 # Check what's running
 kluster status
 
 # Tear it down when you're done
-kluster down --name dev-signet
+kluster down --name dev-spire
 ```
 
 With optional addons:
@@ -85,8 +85,8 @@ Add a `kluster.yaml` to your project root and you never need to remember flags a
 
 ```yaml
 # kluster.yaml
-name: dev-signet
-profile: signet
+name: dev-spire
+profile: spire
 provider: k3d
 trust-domain: dev.cluster.local
 addons:
@@ -124,30 +124,36 @@ jobs:
         run: go install github.com/bytepunx/kluster/kluster@latest
 
       - name: Bring up cluster
-        run: kluster --provider kind up --profile signet --name ci-signet
+        run: kluster --provider kind up --profile spire --name ci-spire
 
       - name: Export kubeconfig
-        run: kluster --provider kind kubeconfig --name ci-signet --output ${{ runner.temp }}/ci-signet.yaml
+        run: kluster --provider kind kubeconfig --name ci-spire --output ${{ runner.temp }}/ci-spire.yaml
 
       - name: Run tests
         run: go test ./...
         env:
-          KUBECONFIG: ${{ runner.temp }}/ci-signet.yaml
+          KUBECONFIG: ${{ runner.temp }}/ci-spire.yaml
 
       - name: Tear down cluster
         if: always()
-        run: kluster --provider kind down --name ci-signet
+        run: kluster --provider kind down --name ci-spire
 ```
 
 ---
 
 ## Profiles
 
-Profiles declare a set of addons and any post-install configuration. They are composable — `authstar` builds on top of `signet`.
+Profiles declare a set of addons and any post-install configuration. They are composable — `authstar` builds on top of `spire`.
 
-### `signet`
+> **`spire` vs. Signet:** the `spire` profile installs the SPIFFE/SPIRE workload
+> identity substrate — it does **not** install [Signet](https://github.com/bytepunx/signet)
+> itself. A dedicated `signet` profile (built on Signet's own Helm chart) does
+> not exist yet; this profile was previously named `signet` and was renamed to
+> `spire` to avoid that confusion.
 
-Installs everything required to run Signet, a SPIFFE-native configuration and secrets manager:
+### `spire`
+
+Installs SPIFFE/SPIRE workload identity — a prerequisite for Signet, not Signet itself:
 
 | Component | Purpose |
 |---|---|
@@ -159,12 +165,12 @@ Installs everything required to run Signet, a SPIFFE-native configuration and se
 SPIFFE trust domain defaults to `dev.cluster.local`. Override with `--trust-domain`.
 
 ```bash
-kluster up --profile signet --name dev-signet --trust-domain myteam.local
+kluster up --profile spire --name dev-spire --trust-domain myteam.local
 ```
 
 ### `authstar`
 
-Composes the `signet` profile and additionally installs:
+Composes the `spire` profile and additionally installs:
 
 | Component | Purpose |
 |---|---|
@@ -186,8 +192,8 @@ Either profile accepts `--addon` flags for opt-in components:
 | `argocd` | ArgoCD | UI at `argocd.<trust-domain>`; admin password: `kluster-admin` |
 
 ```bash
-kluster up --profile signet --addon observability --addon tracing --name dev-full
-kluster up --profile signet --addon argocd --name dev-gitops
+kluster up --profile spire --addon observability --addon tracing --name dev-full
+kluster up --profile spire --addon argocd --name dev-gitops
 ```
 
 ---
@@ -226,12 +232,12 @@ kluster up [flags]
 | Flag | Default | Description |
 |---|---|---|
 | `--name` | *(from `kluster.yaml` or required)* | Cluster name |
-| `--profile` | `signet` | Profile to install: `signet`, `authstar` |
+| `--profile` | `spire` | Profile to install: `spire`, `authstar` |
 | `--addon` | | Additional opt-in addons: `observability`, `tracing`, `argocd`. Repeatable. |
 | `--trust-domain` | `dev.cluster.local` | SPIFFE trust domain |
 | `--k3s-version` | latest stable | k3s version tag (k3d only; ignored by kind) |
 
-Progress is displayed with per-step timing. On a warm machine with cached images, `signet` takes roughly 3 minutes.
+Progress is displayed with per-step timing. On a warm machine with cached images, `spire` takes roughly 3 minutes.
 
 ---
 
@@ -261,7 +267,7 @@ Output:
 
 ```
 NAME          RUNNING  AGE
-dev-signet    yes      14m
+dev-spire     yes      14m
 dev-authstar  yes      2h
 ```
 
@@ -276,8 +282,8 @@ kluster use <name>
 ```
 
 ```bash
-kluster use dev-signet
-# Switched to context "k3d-dev-signet".
+kluster use dev-spire
+# Switched to context "k3d-dev-spire".
 ```
 
 To switch back to a different context afterwards:
@@ -304,10 +310,10 @@ kluster kubeconfig --name <name> [flags]
 
 ```bash
 # Print to stdout
-kluster kubeconfig --name dev-signet
+kluster kubeconfig --name dev-spire
 
 # Write to file (useful in CI)
-kluster kubeconfig --name ci-signet --output /tmp/ci-signet.yaml
+kluster kubeconfig --name ci-spire --output /tmp/ci-spire.yaml
 ```
 
 ---

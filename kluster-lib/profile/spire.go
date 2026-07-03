@@ -8,15 +8,19 @@ import (
 	"github.com/bytepunx/kluster-lib/provider"
 )
 
-type SignetProfile struct{}
+// SpireProfile bootstraps SPIFFE/SPIRE workload identity plus the cert-manager
+// and Traefik TLS plumbing built on top of it. It does not install Signet
+// itself — that is the separate (not yet implemented) "signet" profile, which
+// will depend on this one for workload identity.
+type SpireProfile struct{}
 
-var _ Profile = (*SignetProfile)(nil)
+var _ Profile = (*SpireProfile)(nil)
 
-func init() { Register(&SignetProfile{}) }
+func init() { Register(&SpireProfile{}) }
 
-func (*SignetProfile) Name() string               { return "signet" }
-func (*SignetProfile) RequiresProfiles() []string { return nil }
-func (*SignetProfile) Addons() []string {
+func (*SpireProfile) Name() string               { return "spire" }
+func (*SpireProfile) RequiresProfiles() []string { return nil }
+func (*SpireProfile) Addons() []string {
 	return []string{"cert-manager", "spire", "traefik-tls"}
 }
 
@@ -25,7 +29,7 @@ func (*SignetProfile) Addons() []string {
 // The SPIFFE ID follows the standard path:
 //
 //	spiffe://<trustDomain>/ns/<namespace>/sa/<serviceAccount>
-func (*SignetProfile) Configure(ctx context.Context, h addon.ClusterHandle, cfg provider.ClusterConfig) error {
+func (*SpireProfile) Configure(ctx context.Context, h addon.ClusterHandle, cfg provider.ClusterConfig) error {
 	trustDomain := cfg.TrustDomain
 	if trustDomain == "" {
 		trustDomain = "dev.cluster.local"
@@ -47,11 +51,11 @@ spec:
           - kube-system
           - spire-system
 `, trustDomain)); err != nil {
-		return fmt.Errorf("signet: apply ClusterSPIFFEID: %w", err)
+		return fmt.Errorf("spire: apply ClusterSPIFFEID: %w", err)
 	}
 
 	if err := addon.ProbeSVID(ctx, h, trustDomain); err != nil {
-		return fmt.Errorf("signet: SVID probe: %w", err)
+		return fmt.Errorf("spire: SVID probe: %w", err)
 	}
 
 	return nil

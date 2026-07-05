@@ -46,6 +46,22 @@ func (c *Cluster) Up(ctx context.Context, cfg provider.ClusterConfig, progress P
 		}
 	}
 
+	// ── resolve profiles/addons ──────────────────────────────────────────────────
+	// Pure validation against the static registries — no cluster access needed,
+	// so it happens before anything is created. An unknown profile/addon name or
+	// a cyclic dependency fails fast instead of leaving a half-built cluster
+	// behind that "kluster up" can't simply be re-run against (the provider
+	// refuses to create a cluster that already exists).
+	profileOrder, err := c.resolveProfiles(cfg.Profiles)
+	if err != nil {
+		return fmt.Errorf("resolve profiles: %w", err)
+	}
+	addonNames := c.collectAddons(profileOrder, cfg.Addons)
+	sortedAddons, err := c.topoSort(addonNames)
+	if err != nil {
+		return fmt.Errorf("resolve addon order: %w", err)
+	}
+
 	// ── chart versions ──────────────────────────────────────────────────────────
 	emit(ProgressEvent{Kind: EventStarted, Phase: PhaseSetup,
 		Name: "chart versions", Label: "resolving chart versions"})
@@ -71,23 +87,19 @@ func (c *Cluster) Up(ctx context.Context, cfg provider.ClusterConfig, progress P
 	emit(ProgressEvent{Kind: EventDone, Phase: PhaseSetup,
 		Name: clusterLabel, Elapsed: time.Since(t)})
 
+	// From here on, a failure leaves a real cluster behind, so every error
+	// below points the user at how to recover instead of leaving them to
+	// discover "cluster already exists" on their own retry.
+	guidance := fmt.Sprintf("cluster %q was created but is not fully configured; run 'kluster down --name %s' and retry", cfg.Name, cfg.Name)
+
 	// ── internal plumbing (no events — fast, invisible to the user) ─────────────
 	restConfig, err := c.provider.RESTConfig(ctx, cfg.Name)
 	if err != nil {
-		return fmt.Errorf("get REST config: %w", err)
+		return fmt.Errorf("get REST config: %w\n%s", err, guidance)
 	}
 	handle, err := addon.NewClusterHandle(restConfig, cfg)
 	if err != nil {
-		return fmt.Errorf("build cluster handle: %w", err)
-	}
-	profileOrder, err := c.resolveProfiles(cfg.Profiles)
-	if err != nil {
-		return fmt.Errorf("resolve profiles: %w", err)
-	}
-	addonNames := c.collectAddons(profileOrder, cfg.Addons)
-	sortedAddons, err := c.topoSort(addonNames)
-	if err != nil {
-		return fmt.Errorf("resolve addon order: %w", err)
+		return fmt.Errorf("build cluster handle: %w\n%s", err, guidance)
 	}
 
 	// ── addons ──────────────────────────────────────────────────────────────────
@@ -100,7 +112,7 @@ func (c *Cluster) Up(ctx context.Context, cfg provider.ClusterConfig, progress P
 		if err := a.Install(ctx, handle); err != nil {
 			emit(ProgressEvent{Kind: EventFailed, Phase: PhaseAddon,
 				Name: name, Elapsed: time.Since(t), Err: err})
-			return fmt.Errorf("install %s: %w", name, err)
+			return fmt.Errorf("install %s: %w\n%s", name, err, guidance)
 		}
 
 		emit(ProgressEvent{Kind: EventProgress, Phase: PhaseAddon,
@@ -108,7 +120,7 @@ func (c *Cluster) Up(ctx context.Context, cfg provider.ClusterConfig, progress P
 		if err := a.Ready(ctx, handle); err != nil {
 			emit(ProgressEvent{Kind: EventFailed, Phase: PhaseAddon,
 				Name: name, Elapsed: time.Since(t), Err: err})
-			return fmt.Errorf("wait for %s: %w", name, err)
+			return fmt.Errorf("wait for %s: %w\n%s", name, err, guidance)
 		}
 		emit(ProgressEvent{Kind: EventDone, Phase: PhaseAddon,
 			Name: name, Elapsed: time.Since(t)})
@@ -124,7 +136,7 @@ func (c *Cluster) Up(ctx context.Context, cfg provider.ClusterConfig, progress P
 		if err := p.Configure(ctx, handle, cfg); err != nil {
 			emit(ProgressEvent{Kind: EventFailed, Phase: PhaseProfile,
 				Name: name, Elapsed: time.Since(t), Err: err})
-			return fmt.Errorf("configure profile %s: %w", name, err)
+			return fmt.Errorf("configure profile %s: %w\n%s", name, err, guidance)
 		}
 		emit(ProgressEvent{Kind: EventDone, Phase: PhaseProfile,
 			Name: name, Elapsed: time.Since(t)})
@@ -186,6 +198,17 @@ func (c *Cluster) resolveProfiles(names []string) ([]string, error) {
 
 // collectAddons gathers the deduplicated list of addon names from resolved
 // profiles (in profile order) followed by any explicitly requested extras.
+// An extra name that isn't a real addon but matches a known profile (e.g.
+// "observability") expands to that profile's addons — the documented --addon
+// usage relies on this for addon-group profiles like observability/tracing,
+// not just single addons like argocd.
+//
+// The addon registry is checked BEFORE the profile registry for extras:
+// several addons intentionally share a name with their owning profile
+// ("spire" and "signet" each name both). Checking profiles first would
+// reinterpret e.g. "--addon spire" as the spire *profile* and expand it —
+// which recurses right back into an addon named "spire", already marked
+// seen from the outer call, so it's silently dropped instead of installed.
 func (c *Cluster) collectAddons(profileOrder []string, extra []string) []string {
 	seen := make(map[string]bool)
 	var names []string
@@ -204,8 +227,25 @@ func (c *Cluster) collectAddons(profileOrder []string, extra []string) []string 
 			add(a)
 		}
 	}
-	for _, name := range extra {
+
+	var addExtra func(name string)
+	addExtra = func(name string) {
+		if seen[name] {
+			return
+		}
+		if _, isAddon := c.addons[name]; !isAddon {
+			if p, ok := c.profiles[name]; ok {
+				seen[name] = true
+				for _, a := range p.Addons() {
+					addExtra(a)
+				}
+				return
+			}
+		}
 		add(name)
+	}
+	for _, name := range extra {
+		addExtra(name)
 	}
 	return names
 }

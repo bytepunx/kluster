@@ -61,36 +61,44 @@ fi
 chmod +x "$TMP"
 
 # ── checksum verification ─────────────────────────────────────────────────────
+# Verification is mandatory, not best-effort: a missing sha tool, a failed
+# checksums.txt download, or a missing entry all now abort the install rather
+# than silently installing an unverified binary.
 if command -v sha256sum >/dev/null 2>&1; then
   SHA_CMD="sha256sum"
 elif command -v shasum >/dev/null 2>&1; then
   SHA_CMD="shasum -a 256"
 else
-  SHA_CMD=""
+  fatal "no sha256sum or shasum available — cannot verify download integrity"
 fi
 
-if [ -n "$SHA_CMD" ]; then
-  CHECKSUMS=$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null || true)
-  EXPECTED=$(printf '%s' "$CHECKSUMS" \
-    | grep "${BINARY}-${PLATFORM}" \
-    | awk '{print $1}' \
-    || true)
-  if [ -n "$EXPECTED" ]; then
-    ACTUAL=$(eval "$SHA_CMD" "$TMP" | awk '{print $1}')
-    if [ "$ACTUAL" != "$EXPECTED" ]; then
-      fatal "checksum mismatch — download may be corrupted"
-    fi
-    info "Checksum verified"
-  fi
+CHECKSUMS=$(curl -fsSL "$CHECKSUM_URL" 2>/dev/null || true)
+if [ -z "$CHECKSUMS" ]; then
+  fatal "could not download checksums.txt — cannot verify download integrity"
 fi
+EXPECTED=$(printf '%s' "$CHECKSUMS" \
+  | grep "${BINARY}-${PLATFORM}" \
+  | awk '{print $1}' \
+  || true)
+if [ -z "$EXPECTED" ]; then
+  fatal "no checksum entry for ${BINARY}-${PLATFORM} in checksums.txt"
+fi
+ACTUAL=$(eval "$SHA_CMD" "$TMP" | awk '{print $1}')
+if [ "$ACTUAL" != "$EXPECTED" ]; then
+  fatal "checksum mismatch — download may be corrupted"
+fi
+info "Checksum verified"
 
 # ── install ───────────────────────────────────────────────────────────────────
+# `install` (not `mv`) so the destination gets an explicit mode, and — when
+# sudo is used — root ownership, rather than inheriting the invoking user's
+# ownership and mktemp's 0600/+x from the temp file.
 DEST="${INSTALL_DIR}/${BINARY}"
 if [ -w "$INSTALL_DIR" ]; then
-  mv "$TMP" "$DEST"
+  install -m 0755 "$TMP" "$DEST"
 else
   step "Installing to ${DEST} (sudo required)..."
-  sudo mv "$TMP" "$DEST"
+  sudo install -o root -g root -m 0755 "$TMP" "$DEST"
 fi
 info "Installed ${DEST}"
 

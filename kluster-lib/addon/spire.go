@@ -52,7 +52,7 @@ func (*SpireAddon) Install(ctx context.Context, h ClusterHandle) error {
 		Namespace:       spireNamespace,
 		Version:         versions.For("spire"),
 		CreateNamespace: true,
-		ValuesYaml:      spireValues(h.Config.TrustDomain),
+		ValuesYaml:      spireValues(h.Config.TrustDomainOrDefault()),
 		WaitStrategy:    "legacy",
 		DryRunStrategy:  helmaction.DryRunNone,
 	}, nil)
@@ -148,9 +148,6 @@ func (*SpireAddon) Uninstall(_ context.Context, h ClusterHandle) error {
 }
 
 func spireValues(trustDomain string) string {
-	if trustDomain == "" {
-		trustDomain = "dev.cluster.local"
-	}
 	return fmt.Sprintf(`
 global:
   spire:

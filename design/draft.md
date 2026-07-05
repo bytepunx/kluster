@@ -59,7 +59,7 @@ The `K3dProvider` in `provider/k3d.go` uses the k3d Go library (`github.com/k3d-
 Both `kluster-lib` and `kluster` are written in Go. The decisive factors:
 
 - **k3d is natively importable in Go.** Cluster lifecycle is a library call, not a subprocess.
-- **Helm SDK is Go-native.** `helm.sh/helm/v3` exposes the full Helm engine as a library. `github.com/mittwald/go-helm-client` provides a clean wrapper. No shelling out to `helm` CLI.
+- **Helm SDK is Go-native.** `helm.sh/helm/v4` exposes the full Helm engine as a library. `github.com/mittwald/go-helm-client` provides a clean wrapper. No shelling out to `helm` CLI.
 - **client-go is the canonical Kubernetes client.** `k8s.io/client-go` gives direct, typed access to the Kubernetes API for applying manifests, managing CRDs, and watching resource readiness.
 - **TypeScript lacks equivalents for the critical pieces.** There is no TypeScript-native k3d or kind library; cluster lifecycle would require subprocess calls. There is no Helm SDK for TypeScript; chart installation would require subprocess calls or REST. The TypeScript Kubernetes client (`@kubernetes/client-node`) is mature but narrower in scope.
 
@@ -448,7 +448,7 @@ kluster status
 |---|---|---|
 | `github.com/k3d-io/k3d/v5` | v5.x | Cluster lifecycle (no subprocess) |
 | `k8s.io/client-go` | v0.31.x | Kubernetes API client |
-| `helm.sh/helm/v3` | v3.x | Helm engine SDK |
+| `helm.sh/helm/v4` | v4.x | Helm engine SDK |
 | `github.com/mittwald/go-helm-client` | latest | Helm SDK wrapper |
 | `sigs.k8s.io/controller-runtime` | v0.19.x | Resource readiness utilities |
 | `github.com/spf13/cobra` | v1.x | CLI framework (kluster only) |

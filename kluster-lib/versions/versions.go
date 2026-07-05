@@ -134,11 +134,22 @@ func Ensure(ctx context.Context) (bool, error) {
 
 // For returns the pinned version string for the named addon.
 // Falls back to "> 0.0.0" when the addon is absent from the loaded file,
-// which preserves Helm's latest-available behaviour as a safety net.
+// which preserves Helm's latest-available behaviour as a safety net. That
+// fallback widens the supply-chain window (an unpinned install always
+// resolves to whatever's newest at that moment), so it's never silent: a
+// warning is printed every time it's hit.
+//
+// The "signet" addon always falls back to this: its chart is published to an
+// OCI registry (ghcr.io), which doesn't expose the classic index.yaml this
+// package's Fetch() speaks. Signet's Helm install still resolves correctly
+// (Helm's own registry client lists tags and picks the best semver match
+// against "> 0.0.0"), it just isn't reproducibly pinned by kluster's own
+// chart-versions.yaml the way the other addons are.
 func For(addon string) string {
 	if v, ok := current.Charts[addon]; ok && v != "" {
 		return v
 	}
+	fmt.Fprintf(os.Stderr, "warning: no pinned version for addon %q — installing latest available (unpinned)\n", addon)
 	return "> 0.0.0"
 }
 
@@ -152,13 +163,23 @@ type repoEntry struct {
 	Version string `yaml:"version"`
 }
 
+// indexFetchTimeout bounds a single repo index.yaml fetch so a hung or
+// tarpitting repo can't stall "kluster up" indefinitely.
+const indexFetchTimeout = 30 * time.Second
+
+// maxIndexSize bounds the response body read so a malicious or misbehaving
+// repo can't balloon memory; real Helm indexes run in the tens of MB.
+const maxIndexSize = 50 * 1024 * 1024
+
+var indexHTTPClient = &http.Client{Timeout: indexFetchTimeout}
+
 func fetchIndex(ctx context.Context, repoURL string) (repoIndex, error) {
 	url := strings.TrimRight(repoURL, "/") + "/index.yaml"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return repoIndex{}, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := indexHTTPClient.Do(req)
 	if err != nil {
 		return repoIndex{}, err
 	}
@@ -166,7 +187,7 @@ func fetchIndex(ctx context.Context, repoURL string) (repoIndex, error) {
 	if resp.StatusCode != http.StatusOK {
 		return repoIndex{}, fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexSize))
 	if err != nil {
 		return repoIndex{}, err
 	}

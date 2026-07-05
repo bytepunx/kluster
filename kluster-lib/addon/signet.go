@@ -83,7 +83,7 @@ func (*SignetAddon) Install(ctx context.Context, h ClusterHandle) error {
 		Namespace:       signetNamespace,
 		Version:         versions.For("signet"),
 		CreateNamespace: true,
-		ValuesYaml:      signetValues(h.Config.TrustDomain, auditChainKey),
+		ValuesYaml:      signetValues(h.Config.TrustDomainOrDefault(), auditChainKey),
 		WaitStrategy:    "legacy",
 		DryRunStrategy:  helmaction.DryRunNone,
 		Timeout:         10 * time.Minute,
@@ -95,10 +95,15 @@ func (*SignetAddon) Install(ctx context.Context, h ClusterHandle) error {
 	return nil
 }
 
+// signetValues has a dev-only security posture, matching every other addon
+// in this package: CockroachDB runs single-node, insecure (root, no TLS —
+// deploy/helm/signet's cockroachdb.enabled convenience mode), and
+// auditChainKey travels through Helm values, so it's readable via
+// `helm get values signet -n signet` and lands in the Helm release Secret.
+// Same-namespace secret-read access either way, and the master key (the one
+// that actually gates access to encrypted data) never takes this path — see
+// ensureSignetMasterKeySecret — but this is not a production configuration.
 func signetValues(trustDomain, auditChainKey string) string {
-	if trustDomain == "" {
-		trustDomain = "dev.cluster.local"
-	}
 	dbConnString := fmt.Sprintf(
 		"postgresql://root@%s-cockroachdb.%s.svc.cluster.local:26257/signet?sslmode=disable",
 		signetRelease, signetNamespace,

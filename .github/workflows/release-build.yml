@@ -17,14 +17,18 @@ jobs:
   build:
     name: Build and upload binaries
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write # required by actions/attest-build-provenance
+      attestations: write
     env:
       VERSION: ${{ inputs.version || github.ref_name }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           ref: ${{ inputs.version || github.ref }}
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
           go-version-file: kluster/go.mod
           cache: true
@@ -46,6 +50,11 @@ jobs:
           cd dist
           sha256sum * > checksums.txt
           cat checksums.txt
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*
 
       - name: Upload to release
         env:

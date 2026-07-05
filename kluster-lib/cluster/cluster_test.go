@@ -7,6 +7,7 @@ import (
 	"github.com/bytepunx/kluster-lib/addon"
 	"github.com/bytepunx/kluster-lib/profile"
 	"github.com/bytepunx/kluster-lib/provider"
+	"k8s.io/client-go/rest"
 )
 
 // ── test doubles ────────────────────────────────────────────────────────────
@@ -55,6 +56,27 @@ func clusterWithProfiles(profiles ...*fakeProfile) *Cluster {
 		c.profiles[p.name] = p
 	}
 	return c
+}
+
+// fakeProvider records whether Create was called, so tests can assert that
+// validation failures short-circuit before any cluster is actually created.
+type fakeProvider struct {
+	created bool
+}
+
+func (f *fakeProvider) Create(_ context.Context, _ provider.ClusterConfig) error {
+	f.created = true
+	return nil
+}
+func (f *fakeProvider) Delete(_ context.Context, _ string) error { return nil }
+func (f *fakeProvider) List(_ context.Context) ([]provider.ClusterInfo, error) {
+	return nil, nil
+}
+func (f *fakeProvider) Kubeconfig(_ context.Context, _ string) ([]byte, error) {
+	return nil, nil
+}
+func (f *fakeProvider) RESTConfig(_ context.Context, _ string) (*rest.Config, error) {
+	return nil, nil
 }
 
 // ── topoSort ────────────────────────────────────────────────────────────────
@@ -182,5 +204,67 @@ func TestCollectAddons_Deduplication(t *testing.T) {
 		if n != want[i] {
 			t.Errorf("[%d] got %q, want %q", i, n, want[i])
 		}
+	}
+}
+
+func TestCollectAddons_ExtraProfileNameExpandsToItsAddons(t *testing.T) {
+	// --addon observability is documented usage, but "observability" is a
+	// profile (prometheus + grafana), not an addon — it must expand rather
+	// than be passed through to topoSort verbatim (which would then fail
+	// with "unknown addon").
+	c := clusterWithProfiles(
+		&fakeProfile{name: "spire", addons: []string{"cert-manager"}},
+		&fakeProfile{name: "observability", addons: []string{"prometheus", "grafana"}},
+	)
+	names := c.collectAddons([]string{"spire"}, []string{"observability", "argocd"})
+	want := []string{"cert-manager", "prometheus", "grafana", "argocd"}
+	if len(names) != len(want) {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+	for i, n := range names {
+		if n != want[i] {
+			t.Errorf("[%d] got %q, want %q", i, n, want[i])
+		}
+	}
+}
+
+func TestCollectAddons_ExtraAddonNameSharedWithProfileNamePrefersAddon(t *testing.T) {
+	// Both "spire" and "signet" name an addon AND their owning profile in
+	// production. An extra name that is a real addon must resolve as that
+	// addon, not get reinterpreted as the same-named profile — which would
+	// expand right back into an addon already marked seen, silently
+	// dropping it instead of installing it.
+	c := &Cluster{
+		addons: map[string]addon.Addon{
+			"spire": &fakeAddon{name: "spire"},
+		},
+		profiles: map[string]profile.Profile{
+			"spire": &fakeProfile{name: "spire", addons: []string{"spire"}},
+		},
+	}
+	names := c.collectAddons(nil, []string{"spire"})
+	want := []string{"spire"}
+	if len(names) != len(want) || names[0] != "spire" {
+		t.Fatalf("got %v, want %v", names, want)
+	}
+}
+
+// ── Up ──────────────────────────────────────────────────────────────────────
+
+func TestUp_UnknownAddonFailsBeforeClusterCreate(t *testing.T) {
+	fp := &fakeProvider{}
+	c := &Cluster{
+		provider: fp,
+		addons:   make(map[string]addon.Addon),
+		profiles: make(map[string]profile.Profile),
+	}
+	c.profiles["spire"] = &fakeProfile{name: "spire", addons: []string{"missing-addon"}}
+
+	err := c.Up(context.Background(), provider.ClusterConfig{Name: "t1", Profiles: []string{"spire"}}, nil)
+	if err == nil {
+		t.Fatal("expected error for unknown addon, got nil")
+	}
+	if fp.created {
+		t.Error("provider.Create was called despite unresolvable addon list — validation should happen first")
 	}
 }

@@ -1,6 +1,3 @@
 package cluster
 
-const (
-	DefaultTrustDomain = "dev.cluster.local"
-	DefaultK3sVersion  = ""
-)
+const DefaultK3sVersion = ""

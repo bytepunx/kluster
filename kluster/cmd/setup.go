@@ -17,8 +17,10 @@ var setupDryRun bool
 var setupCmd = &cobra.Command{
 	Use:   "setup",
 	Short: "Check prerequisites and install any that are missing",
-	Long: `Checks for required tools (Docker, k3d, kubectl) and installs anything
+	Long: `Checks for required tools (Docker, kubectl) and installs anything
 missing. Docker is never auto-installed — clear instructions are printed instead.
+(k3d and kind are embedded Go libraries, not standalone CLIs — nothing to
+check or install for either.)
 
 Use --dry-run to preview what would be installed without making changes.`,
 	RunE: runSetup,
@@ -72,6 +74,13 @@ func runSetup(cmd *cobra.Command, _ []string) error {
 
 		allOK = false
 		if t.dockerOnly {
+			if version != "" {
+				// Docker is installed but the daemon didn't respond — a
+				// different failure than "not found", and one that
+				// "install Docker" instructions won't fix.
+				fmt.Fprintf(out, "  \033[31m✗\033[0m %s — %s\n", t.name, version)
+				continue
+			}
 			fmt.Fprintf(out, "  \033[31m✗\033[0m %s — not found\n", t.name)
 			printDockerInstructions(out, p)
 			continue
@@ -156,7 +165,9 @@ func checkDocker() (string, bool) {
 	}
 	out, err := exec.Command("docker", "version", "--format", "{{.Server.Version}}").Output()
 	if err != nil {
-		return "(daemon not running)", true
+		// Installed but unreachable is a failure, not a pass: everything
+		// kluster does depends on a running daemon.
+		return "found, but daemon unreachable — start Docker Desktop / dockerd", false
 	}
 	return strings.TrimSpace(string(out)), true
 }
@@ -185,13 +196,22 @@ func installKubectl(p platform) error {
 		}
 		return fmt.Errorf("homebrew not found — visit https://kubernetes.io/docs/tasks/tools/install-kubectl-macos/")
 	case "linux":
+		// Download into a private mktemp -d directory rather than a fixed
+		// /tmp/kubectl path: on a multi-user host, a predictable path lets
+		// another local user pre-create or symlink it and race the sudo
+		// install with an attacker-controlled binary (TOCTOU). The checksum
+		// check runs before that install and aborts (set -e) on any mismatch.
 		return runCmd("sh", "-c",
 			`set -e
 ARCH=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
 VERSION=$(curl -sL https://dl.k8s.io/release/stable.txt)
-curl -sLo /tmp/kubectl "https://dl.k8s.io/release/${VERSION}/bin/linux/${ARCH}/kubectl"
-chmod +x /tmp/kubectl
-sudo mv /tmp/kubectl /usr/local/bin/kubectl`)
+TMPDIR=$(mktemp -d)
+trap 'rm -rf "$TMPDIR"' EXIT
+curl -sLo "$TMPDIR/kubectl" "https://dl.k8s.io/release/${VERSION}/bin/linux/${ARCH}/kubectl"
+curl -sLo "$TMPDIR/kubectl.sha256" "https://dl.k8s.io/release/${VERSION}/bin/linux/${ARCH}/kubectl.sha256"
+(cd "$TMPDIR" && echo "$(cat kubectl.sha256)  kubectl" | sha256sum -c -)
+chmod +x "$TMPDIR/kubectl"
+sudo install -o root -g root -m 0755 "$TMPDIR/kubectl" /usr/local/bin/kubectl`)
 	default:
 		return fmt.Errorf("automatic install not supported on %s — visit https://kubernetes.io/docs/tasks/tools/", p.os)
 	}

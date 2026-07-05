@@ -58,10 +58,24 @@ func NewClusterHandle(rc *rest.Config, cfg provider.ClusterConfig) (ClusterHandl
 	}
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))
 
-	helmCacheDir := filepath.Join(os.TempDir(), "kluster", "helm-cache")
-	helmReposFile := filepath.Join(os.TempDir(), "kluster", "helm-repos.yaml")
-	if err := os.MkdirAll(helmCacheDir, 0o755); err != nil {
+	// os.TempDir() (/tmp) is world-writable: another local user could win the
+	// race to create "kluster/helm-cache" first and plant a poisoned chart
+	// cache. User-private cache/config dirs avoid that entirely.
+	cacheDir, err := os.UserCacheDir()
+	if err != nil {
+		return ClusterHandle{}, fmt.Errorf("resolve user cache dir: %w", err)
+	}
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return ClusterHandle{}, fmt.Errorf("resolve user config dir: %w", err)
+	}
+	helmCacheDir := filepath.Join(cacheDir, "kluster", "helm-cache")
+	helmReposFile := filepath.Join(configDir, "kluster", "helm-repos.yaml")
+	if err := os.MkdirAll(helmCacheDir, 0o700); err != nil {
 		return ClusterHandle{}, fmt.Errorf("create helm cache dir: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(helmReposFile), 0o700); err != nil {
+		return ClusterHandle{}, fmt.Errorf("create helm config dir: %w", err)
 	}
 
 	factory := func(namespace string) (helmclient.Client, error) {

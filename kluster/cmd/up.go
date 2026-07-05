@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/bytepunx/kluster-lib/cluster"
 	"github.com/bytepunx/kluster-lib/provider"
 	"github.com/spf13/cobra"
@@ -21,12 +23,16 @@ func init() {
 	rootCmd.AddCommand(upCmd)
 	upCmd.Flags().String("name", "", "Cluster name")
 	upCmd.Flags().String("profile", "spire", "Profile to activate: spire, signet, authstar")
-	upCmd.Flags().StringArray("addon", nil, "Additional opt-in addons: observability, tracing. Repeatable.")
-	upCmd.Flags().String("trust-domain", "dev.cluster.local", "SPIFFE trust domain")
+	upCmd.Flags().StringArray("addon", nil, "Additional opt-in addons: argocd, or addon groups observability, tracing. Repeatable.")
+	upCmd.Flags().String("trust-domain", provider.DefaultTrustDomain, "SPIFFE trust domain")
 	upCmd.Flags().String("k3s-version", "", "k3s version tag (default: latest stable)")
 }
 
 func runUp(cmd *cobra.Command, _ []string) error {
+	if notice := repoLocalConfigNotice(); notice != "" {
+		fmt.Fprintln(cmd.OutOrStdout(), notice)
+	}
+
 	name, err := requireName(cmd)
 	if err != nil {
 		return err

@@ -13,7 +13,7 @@ The project has two Go modules:
 
 **k3d** (k3s in Docker) is the cluster runtime. k3d is written in Go and its cluster lifecycle is importable directly as `github.com/k3d-io/k3d/v5` — no shelling out. k3d wraps k3s, providing full k3s compatibility with Docker-based lifecycle management and no VM layer requirement.
 
-A `kind` provider may be added later as a CI-optimized alternative.
+A `kind` provider is also implemented, as a CI-optimized alternative (`--provider kind`).
 
 ## Key dependency projects
 
@@ -61,15 +61,18 @@ kluster/
 │   ├── provider/
 │   │   ├── provider.go           # Provider interface
 │   │   ├── k3d.go                # k3d cluster lifecycle
-│   │   └── kind.go               # kind provider (future/CI)
+│   │   └── kind.go               # kind provider (CI-optimized alternative)
 │   ├── addon/
 │   │   ├── addon.go              # Addon interface + registry
+│   │   ├── apply.go              # server-side-apply manifest helper
+│   │   ├── probe.go              # real SVID-issuance probe (used by spire profile)
 │   │   ├── certmanager.go
 │   │   ├── spire.go
 │   │   ├── signet.go             # Signet itself (OCI chart, auto-unseal)
 │   │   ├── traefik.go
 │   │   ├── rabbitmq.go
 │   │   ├── dex.go
+│   │   ├── argocd.go
 │   │   ├── observability.go      # Prometheus + Grafana
 │   │   └── tracing.go            # Loki + Tempo
 │   ├── profile/
@@ -79,22 +82,29 @@ kluster/
 │   │   ├── authstar.go
 │   │   ├── observability.go
 │   │   └── tracing.go
-│   └── cluster/
-│       ├── cluster.go            # Cluster struct + lifecycle orchestration
-│       └── config.go             # ClusterConfig
+│   ├── cluster/
+│   │   ├── cluster.go            # Cluster struct + lifecycle orchestration
+│   │   └── config.go             # ClusterConfig
+│   └── versions/
+│       └── versions.go           # chart-version pinning (~/.config/kluster/chart-versions.yaml)
 └── kluster/                      # CLI
     └── cmd/
         ├── root.go
+        ├── config.go             # kluster.yaml / viper wiring
         ├── up.go
         ├── down.go
+        ├── use.go                # merge kubeconfig + switch context
         ├── status.go
-        └── kubeconfig.go
+        ├── kubeconfig.go
+        ├── charts.go             # charts list / charts update
+        ├── setup.go              # prerequisite checker/installer
+        └── progress.go           # TTY/non-TTY progress renderer
 ```
 
 ## Key design constraints
 
 1. **No automation logic in the CLI.** The CLI parses flags, builds a `ClusterConfig`, delegates to `kluster-lib`, and renders output. Period.
-2. **No shelling out for core operations.** Cluster lifecycle uses the k3d Go library directly. Helm installs use the Helm Go SDK (`helm.sh/helm/v3`) via `go-helm-client`. Kubernetes resource management uses `client-go`.
+2. **No shelling out for core operations.** Cluster lifecycle uses the k3d Go library directly. Helm installs use the Helm Go SDK (`helm.sh/helm/v4`) via `go-helm-client`. Kubernetes resource management uses `client-go`.
 3. **Ordered addon installation.** Profiles declare addon dependencies explicitly. The library resolves a deterministic installation order (topological sort). Addons declare their own prerequisites.
 4. **SPIRE is not optional for Signet.** The `spire` profile unconditionally installs SPIRE with the SPIRE Controller Manager. Registration entries are managed via `ClusterSPIFFEID` CRDs, not manual `spire-server entry create` calls, to mirror production behavior.
 5. **SVID extraction must be testable.** The local SPIRE setup must support real SVID issuance and extraction — not mocked. Workload attestation uses Kubernetes Service Account Tokens (the standard local attestation method).
@@ -105,7 +115,7 @@ kluster/
 |---|---|
 | `github.com/k3d-io/k3d/v5` | Cluster lifecycle (create, delete, list, kubeconfig) |
 | `k8s.io/client-go` | Kubernetes API (apply manifests, watch readiness, manage CRDs) |
-| `helm.sh/helm/v3` | Helm SDK (chart install/upgrade/uninstall) |
+| `helm.sh/helm/v4` | Helm SDK (chart install/upgrade/uninstall) |
 | `github.com/mittwald/go-helm-client` | Higher-level wrapper over Helm SDK |
 | `sigs.k8s.io/controller-runtime` | Resource readiness waiting |
 | `github.com/spf13/cobra` | CLI framework (kluster module only) |
@@ -114,12 +124,15 @@ kluster/
 ## CLI command surface
 
 ```bash
+kluster setup
 kluster up --profile spire --name dev-spire
 kluster up --profile signet --name dev-signet
 kluster up --profile authstar --addon observability --name dev-authstar
-kluster down --name dev-authstar
+kluster use dev-signet
 kluster status
 kluster kubeconfig --name dev-signet
+kluster charts list
+kluster down --name dev-authstar
 ```
 
 ## What is explicitly out of scope (for now)

@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -139,7 +140,9 @@ func kindNodeImage(version string) string {
 
 // raiseKindInotifyLimits execs sysctl inside the kind node container to raise
 // inotify limits. kind nodes are privileged containers that share the host
-// kernel, so this affects the host. Errors are silently ignored (best-effort).
+// kernel, so this affects the host — and persists until reboot; it is never
+// reverted on "kluster down" (other kind clusters on the same machine may
+// rely on the raised limit). Errors are silently ignored (best-effort).
 func raiseKindInotifyLimits(ctx context.Context, clusterName string) {
 	dc, err := dockerclient.NewClientWithOpts(
 		dockerclient.FromEnv,
@@ -150,11 +153,14 @@ func raiseKindInotifyLimits(ctx context.Context, clusterName string) {
 	}
 	defer dc.Close()
 
-	container := clusterName + "-control-plane"
-	for _, kv := range []string{
+	kvs := []string{
 		"fs.inotify.max_user_instances=512",
 		"fs.inotify.max_user_watches=524288",
-	} {
+	}
+	fmt.Fprintf(os.Stderr, "kind: raising host inotify limits (%s) — persists until reboot\n", strings.Join(kvs, ", "))
+
+	container := clusterName + "-control-plane"
+	for _, kv := range kvs {
 		resp, err := dc.ContainerExecCreate(ctx, container, dockercontainer.ExecOptions{
 			Cmd: []string{"sysctl", "-w", kv},
 		})

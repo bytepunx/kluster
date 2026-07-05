@@ -31,9 +31,6 @@ const (
 // argoCDValues returns the Helm values for ArgoCD.
 // passwordHash is a bcrypt hash of ArgoCDAdminPassword.
 func argoCDValues(trustDomain, passwordHash string) string {
-	if trustDomain == "" {
-		trustDomain = "dev.cluster.local"
-	}
 	return fmt.Sprintf(`
 global:
   domain: argocd.%s
@@ -43,6 +40,9 @@ server:
 
 configs:
   params:
+    # By design, not an oversight: TLS is terminated at Traefik (see the
+    # traefik-tls addon), so ArgoCD's own server can speak plain HTTP behind
+    # it. Don't "fix" this into ArgoCD trying to also terminate TLS itself.
     server.insecure: "true"
   secret:
     argocdServerAdminPassword: %q
@@ -77,8 +77,13 @@ func (*ArgoCDAddon) Name() string      { return "argocd" }
 func (*ArgoCDAddon) Requires() []string { return []string{"traefik-tls"} }
 
 func (*ArgoCDAddon) Install(ctx context.Context, h ClusterHandle) error {
-	// Hash the admin password at install time so it never appears in plaintext
-	// in a Kubernetes secret.
+	// ArgoCDAdminPassword is a published dev-only constant, not a secret —
+	// hashing it here isn't about protecting the password (it's already in
+	// source and the README). It's what lets us set a known password via
+	// Helm values at all: ArgoCD only accepts a bcrypt hash in
+	// configs.secret.argocdServerAdminPassword, and doing this at install
+	// time skips ArgoCD's usual random-initial-password + extract-and-reset
+	// dance.
 	hash, err := bcrypt.GenerateFromPassword([]byte(ArgoCDAdminPassword), bcrypt.DefaultCost)
 	if err != nil {
 		return fmt.Errorf("argocd: hash admin password: %w", err)
@@ -102,7 +107,7 @@ func (*ArgoCDAddon) Install(ctx context.Context, h ClusterHandle) error {
 		Namespace:       argoCDNamespace,
 		Version:         versions.For("argocd"),
 		CreateNamespace: true,
-		ValuesYaml:      argoCDValues(h.Config.TrustDomain, string(hash)),
+		ValuesYaml:      argoCDValues(h.Config.TrustDomainOrDefault(), string(hash)),
 		WaitStrategy:    "legacy",
 		DryRunStrategy:  helmaction.DryRunNone,
 		Timeout:         15 * time.Minute,
@@ -113,10 +118,7 @@ func (*ArgoCDAddon) Install(ctx context.Context, h ClusterHandle) error {
 
 	// Expose ArgoCD UI via Traefik IngressRoute using the cluster's default
 	// TLS certificate (issued by cert-manager via the traefik-tls addon).
-	domain := h.Config.TrustDomain
-	if domain == "" {
-		domain = "dev.cluster.local"
-	}
+	domain := h.Config.TrustDomainOrDefault()
 	if err := ApplyManifest(ctx, h, fmt.Sprintf(`
 apiVersion: traefik.io/v1alpha1
 kind: IngressRoute

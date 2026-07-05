@@ -23,7 +23,7 @@ Both providers are embedded as Go libraries. No runtime binaries need to be pre-
 
 - **Docker** — required by both providers
 
-That's it. kluster uses the k3d and kind Go libraries directly and does not shell out to any external tools. Run `kluster setup` to verify your environment.
+That's it. Cluster lifecycle and addon installation use the k3d/kind and Helm Go SDKs directly and never shell out. (The optional `kluster setup` helper below is the one exception — it shells out to check/install prerequisites like `kubectl`.) Run `kluster setup` to verify your environment.
 
 ---
 
@@ -35,7 +35,13 @@ That's it. kluster uses the k3d and kind Go libraries directly and does not shel
 curl -fsSL https://raw.githubusercontent.com/bytepunx/kluster/main/install.sh | bash
 ```
 
-The script detects your platform, downloads the correct binary from the latest release, installs it to `/usr/local/bin`, and warns you if that directory is not in your `PATH`.
+The script detects your platform, downloads the correct binary from the latest release, verifies its checksum, installs it to `/usr/local/bin`, and warns you if that directory is not in your `PATH`.
+
+Every release binary also carries a [build provenance attestation](https://github.com/bytepunx/kluster/attestations), verifiable independently of the checksum:
+
+```bash
+gh attestation verify dist/kluster-<os>-<arch> -R bytepunx/kluster
+```
 
 **From source:**
 
@@ -107,6 +113,8 @@ kluster searches for the config file in this order:
 
 kind runs standard upstream Kubernetes inside Docker. Pass `--provider kind` to every command — it must match the provider used to create the cluster.
 
+**Host state note:** kind nodes are privileged containers that share the host kernel. On cluster creation, kluster raises `fs.inotify.max_user_instances`/`max_user_watches` inside the node — which, because the kernel is shared, raises them on the **host**, not just the container. This persists until reboot and is not reverted by `kluster down` (other kind clusters on the same machine may depend on the raised limit). A one-line notice is printed when this happens.
+
 **GitHub Actions example:**
 
 ```yaml
@@ -163,6 +171,8 @@ Installs SPIFFE/SPIRE workload identity — a prerequisite for Signet, not Signe
 
 SPIFFE trust domain defaults to `dev.cluster.local`. Override with `--trust-domain`.
 
+**Dev-only identity scope:** by default every workload in every namespace (other than kluster's own infra: `kube-system`, `spire-system`, `cert-manager`, `monitoring`, `argocd`, `dex`, `rabbitmq`) automatically receives an SVID — no per-workload registration needed. No production trust domain issues identities this broadly; this exists purely so a test workload just works without extra setup.
+
 ```bash
 kluster up --profile spire --name dev-spire --trust-domain myteam.local
 ```
@@ -177,6 +187,8 @@ Composes the `spire` profile and installs Signet itself, pulled directly from Si
 | **CockroachDB** | In-cluster, single-node (dev-only; disable for a real backend) |
 
 Fully unattended: kluster generates Signet's master key and audit-chain key and pre-seeds the Kubernetes Secret Signet's auto-unseal mode reads, so the deployment comes up already unsealed — no `signet init` step required. Not for production use; it exists purely so a local test cluster is immediately usable.
+
+**Dev-only posture:** CockroachDB runs single-node and insecure (root, no TLS); the audit-chain key is passed via Helm values, so it's readable via `helm get values signet -n signet`. The master key that actually gates access to encrypted secrets is never passed this way — it's pre-seeded directly as a Kubernetes Secret and never travels through Helm.
 
 ```bash
 kluster up --profile signet --name dev-signet
@@ -197,18 +209,41 @@ kluster up --profile authstar --name dev-authstar
 
 ### Optional addons
 
-Either profile accepts `--addon` flags for opt-in components:
+Any profile accepts `--addon` flags for opt-in components. `observability` and `tracing` are addon *groups* (themselves backed by a profile) rather than a single addon — `--addon` resolves either kind by name:
 
-| Addon | Components | Notes |
+| `--addon` value | Installs | Notes |
 |---|---|---|
-| `observability` | Prometheus + Grafana | |
-| `tracing` | Loki + Tempo | |
+| `observability` | Prometheus + Grafana | addon group |
+| `tracing` | Loki + Tempo | addon group |
 | `argocd` | ArgoCD | UI at `argocd.<trust-domain>`; admin password: `kluster-admin` |
 
 ```bash
 kluster up --profile spire --addon observability --addon tracing --name dev-full
 kluster up --profile spire --addon argocd --name dev-gitops
 ```
+
+**Reaching `argocd.<trust-domain>` from your host:** kluster doesn't map any host port to Traefik or touch `/etc/hosts`, so that hostname isn't resolvable or reachable out of the box. Port-forward Traefik directly and add a hosts entry pointing at loopback:
+
+```bash
+kubectl port-forward -n kube-system svc/traefik 8443:443 &
+echo "127.0.0.1 argocd.dev.cluster.local" | sudo tee -a /etc/hosts
+```
+
+Then browse to `https://argocd.dev.cluster.local:8443`. This is a rough edge in the current tooling (no k3d port mapping, no hosts-file automation), called out here so the documented login flow is actually followable.
+
+---
+
+## Default credentials — dev only
+
+Every addon below installs with a fixed, well-known credential. This is fine for a disposable local cluster where every service is `ClusterIP` (not reachable off-host — see the k3d API-server binding note above) and the only way in is through your own kubeconfig, but don't reuse these anywhere that matters:
+
+| Service | Credential | Notes |
+|---|---|---|
+| RabbitMQ | `guest` / `guest` | Management UI |
+| Grafana | `admin` / `admin` | |
+| Dex | `admin@example.com` / `password` | Static user for OIDC flow testing |
+| Dex OAuth client | `authstar` / `authstar-dev-secret` | Fixed — AuthStar's config depends on this exact value |
+| ArgoCD | `admin` / `kluster-admin` | UI at `argocd.<trust-domain>` |
 
 ---
 
@@ -260,12 +295,15 @@ Progress is displayed with per-step timing. On a warm machine with cached images
 Destroys a named cluster and removes its kubeconfig entry.
 
 ```
-kluster down [--name <name>]
+kluster down [--name <name>] [--yes]
 ```
+
+If the cluster name was resolved from a `./kluster.yaml` in the current directory (rather than an explicit `--name`), `down` prompts for confirmation and shows where the name came from — cloning a repo containing a `kluster.yaml` shouldn't be able to silently steer a `down` at whatever cluster name it declares. Pass `--yes` to skip the prompt (CI/scripts); an explicit `--name` always skips it too.
 
 | Flag | Default | Description |
 |---|---|---|
 | `--name` | *(from `kluster.yaml` or required)* | Cluster name |
+| `--yes`, `-y` | `false` | Skip the confirmation prompt |
 
 ---
 
@@ -393,7 +431,9 @@ On first run, kluster fetches the latest stable version of each chart and caches
 ~/.config/kluster/chart-versions.yaml
 ```
 
-All subsequent `kluster up` invocations use the cached versions, ensuring reproducible installs across your team. The file is safe to commit to a dotfiles repo.
+All subsequent `kluster up` invocations on that machine use the cached versions, ensuring reproducible installs over time — the file is per-machine, generated whenever it's first missing, so two teammates who each first ran `kluster up` a week apart will have different pins out of the box. To actually share pins across a team, commit `~/.config/kluster/chart-versions.yaml` somewhere your team pulls from (a dotfiles repo, or your project repo with `--config`-style tooling) and have everyone use that copy.
+
+Note also that any addon not in `versions.Catalog` (currently just `signet`, since its chart is OCI-only — see the `signet` profile section above) is never pinned by this file at all; it always resolves to the latest published chart.
 
 Run `kluster charts update` when you want to pull in newer chart versions.
 

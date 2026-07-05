@@ -87,7 +87,7 @@ spec:
 	}
 
 	// 2. Certificate in kube-system — cert-manager issues the TLS secret here
-	dnsNames := traefikDNSNames(h.Config.TrustDomain)
+	dnsNames := traefikDNSNames(h.Config.TrustDomainOrDefault())
 	cert := &unstructured.Unstructured{}
 	cert.SetGroupVersionKind(schema.GroupVersionKind{
 		Group: "cert-manager.io", Version: "v1", Kind: "Certificate",
@@ -209,8 +209,5 @@ func installTraefikHelm(ctx context.Context, h ClusterHandle) error {
 }
 
 func traefikDNSNames(trustDomain string) []interface{} {
-	if trustDomain == "" {
-		trustDomain = "dev.cluster.local"
-	}
 	return []interface{}{"*." + trustDomain, trustDomain, "localhost"}
 }

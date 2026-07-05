@@ -1,0 +1,76 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build, vet, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: kluster-lib/go.mod
+          cache: true
+
+      - name: Build
+        run: make build
+
+      - name: Vet + test
+        run: make check
+
+  lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [kluster-lib, kluster]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: kluster-lib/go.mod
+          cache: true
+
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
+        with:
+          working-directory: ${{ matrix.module }}
+          # Pinned to v1 to match this repo's v1-schema .golangci.yml
+          # (golangci-lint v2 uses an incompatible config schema).
+          version: v1.64.8
+
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [kluster-lib, kluster]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: kluster-lib/go.mod
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      # continue-on-error: both modules currently report GO-2026-5746 (a
+      # github.com/docker/docker transitive dependency, pulled in via k3d/
+      # kind) with no fixed version yet available upstream — see
+      # design/checklist.md. A permanently-red required check trains people
+      # to ignore CI; remove continue-on-error once a fix ships or an
+      # allowlist mechanism is in place.
+      - name: Run govulncheck
+        working-directory: ${{ matrix.module }}
+        run: govulncheck ./...
+        continue-on-error: true

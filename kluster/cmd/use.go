@@ -38,7 +38,7 @@ func runUse(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	contextName, err := mergeKubeconfig(data)
+	contextName, err := mergeKubeconfig(data, cmd.ErrOrStderr())
 	if err != nil {
 		return err
 	}

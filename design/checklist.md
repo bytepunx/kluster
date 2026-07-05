@@ -83,7 +83,7 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 | `Cluster` struct + `New` | ✅ | `cluster/cluster.go` |
 | `topoSort` (DFS, cycle detection) | ✅ | Tested: linear chain, diamond dedup, cycle, unknown addon |
 | `resolveProfiles` | ✅ | DFS topo over RequiresProfiles; cycle detection |
-| `collectAddons` | ✅ | Deduped union from profiles (in order) + explicit extras |
+| `collectAddons` | ✅ | Deduped union from profiles (in order) + explicit extras; an extra name resolves as an addon first, only expanding as a profile's addon-group if no addon of that name exists (avoids the "spire"/"signet" addon-vs-profile name collision) |
 | `Cluster.Up` — full flow | ✅ | Create → RESTConfig → handle → profiles → addons → Install/Ready → Configure |
 | `Cluster.Up` — progress events | ✅ | `ProgressFunc` / `ProgressEvent`; PhaseSetup / PhaseAddon / PhaseProfile; elapsed times |
 | `Cluster.Down` | ✅ | Delegates to provider.Delete; k3d removes Docker containers + all state |
@@ -100,7 +100,7 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 | `versions.Catalog` | ✅ | cert-manager, spire, traefik, rabbitmq, dex, prometheus, grafana, loki, tempo |
 | `versions.Fetch` | ✅ | HTTP GET index.yaml per repo; deduped by URL; latest stable via semver sort |
 | `versions.Ensure` | ✅ | Load from disk or fetch+save; populates `For()` package state |
-| `versions.For(addon)` | ✅ | Returns pinned version or `"> 0.0.0"` fallback |
+| `versions.For(addon)` | ✅ | Returns pinned version or `"> 0.0.0"` fallback; prints a warning every time it falls back, since an unpinned install is a silent supply-chain-window widening otherwise. `signet` always falls back — its chart is OCI-only (ghcr.io), which doesn't expose the index.yaml this package's `Fetch()` speaks; Helm's own registry client still resolves the install correctly against live tags, it's just not pinned by kluster's own file. |
 | `versions.Save` / `Load` | ✅ | YAML at `~/.config/kluster/chart-versions.yaml` |
 
 ---
@@ -111,7 +111,7 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 |---|---|---|
 | `root` | ✅ | Cobra root; `--provider k3d\|kind` persistent flag; `resolveProvider()` helper |
 | `up` | ✅ | Uses `NewDefault`; addons/profiles auto-registered via import side-effects |
-| `down` | ✅ | Delegates to provider.Delete |
+| `down` | ✅ | Delegates to provider.Delete; prompts for confirmation (shows config source) when the cluster name came from a repo-local `./kluster.yaml` rather than `--name`; `--yes`/`-y` skips |
 | `status` | ✅ | Tabwriter table with NAME / RUNNING / AGE columns |
 | `kubeconfig` | ✅ | `--output` file write; `--merge` merges into ~/.kube/config and switches context |
 | `use` | ✅ | Merges kubeconfig into ~/.kube/config, switches context, prints confirmation |
@@ -123,93 +123,12 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 
 ---
 
-## Upcoming Features
+## CI / Supply Chain
 
-### Config file (`kluster.yaml`)
-
-A project-level YAML file users commit alongside their code. Eliminates the need to memorize or copy-paste flags across team members and CI scripts.
-
-**File search order:**
-1. Path from `--config` flag
-2. `./kluster.yaml` (current working directory)
-3. `$XDG_CONFIG_HOME/kluster/kluster.yaml` (user-level defaults)
-
-**Schema:**
-
-```yaml
-# kluster.yaml
-name: dev-spire
-profile: spire
-provider: k3d
-trust-domain: dev.cluster.local
-addons:
-  - observability
-k3s-version: ""           # optional pin; empty = latest stable
-```
-
-**Behavior:**
-- CLI flags override file values: `flag > file > built-in default`
-- `kluster up` with no flags and a valid `kluster.yaml` should just work
-- `kluster down` reads `name` from config so `kluster down` alone tears down the project cluster
-- Viper is already a dependency in the CLI module — use it for file loading + flag binding
-
-**Implementation touches:**
-- `kluster/cmd/root.go` — add `--config` flag; call `viper.SetConfigFile` / `viper.AutomaticEnv`; `viper.SetConfigName("kluster")` + search paths
-- `kluster/cmd/up.go` — bind each flag to a Viper key with `viper.GetString` / `viper.GetStringSlice`; read defaults from Viper when flag not set
-- `kluster/cmd/down.go` — read `name` from Viper when `--name` not provided (mark flag as not required when Viper is wired)
-
----
-
-### ArgoCD addon (`argocd`)
-
-Installs ArgoCD as an opt-in addon, pre-configured for local GitOps workflow testing.
-
-**Chart:** `argo/argo-cd` from `https://argoproj.github.io/argo-helm`
-
-**What it does:**
-- Helm-installs ArgoCD into the `argocd` namespace
-- Sets a deterministic admin password (e.g. `kluster-admin`) via bcrypt hash in Helm values — no secret extraction needed
-- Creates a Traefik `IngressRoute` to expose the ArgoCD UI at `argocd.<trust-domain>`
-- Waits for the `argocd-server` Deployment to have ≥1 ready replica
-
-**Usage:**
-```bash
-kluster up --profile spire --addon argocd --name dev-gitops
-```
-
-**Implementation:**
-- New file `kluster-lib/addon/argocd.go` implementing the `Addon` interface
-- `Requires() []string` → `["traefik-tls"]` (needs Traefik IngressRoute CRDs + the default cert)
-- Add `argocd` entry to `versions.Catalog` (repo: `https://argoproj.github.io/argo-helm`, chart: `argo-cd`)
-- Helm values: disable built-in Dex (OIDC handled by the `dex` addon if present), single-replica server, pre-set bcrypt admin password hash
-- `Ready()`: poll `argocd-server` Deployment, `argocd-repo-server` Deployment, and `argocd-application-controller` StatefulSet for `ReadyReplicas >= 1`
-
----
-
-### `kluster setup` (prerequisite installer)
-
-A one-shot command that checks for required tools and installs anything missing. Lowers the barrier to first use — especially useful when onboarding new team members or configuring a fresh CI runner.
-
-**What it checks / installs:**
-
-| Tool | Check | Install method |
+| Item | Status | Notes |
 |---|---|---|
-| Docker | `docker info` | Print distro-specific instructions only (too varied to auto-install) |
-| k3d | `k3d version` | `curl` install script on Linux; `brew install k3d` on macOS |
-| kubectl | `kubectl version --client` | `curl` from dl.k8s.io on Linux; `brew install kubectl` on macOS |
+| `ci.yml` | ✅ | Runs on PRs + push to main: build/vet/test (`make build`, `make check`), `golangci-lint` (both modules, pinned to v1.64.8 — this repo's `.golangci.yml` is v1-schema, incompatible with golangci-lint v2's default config format), `govulncheck` (both modules) |
+| `release-build.yml` / `release-please.yml` | ✅ | Actions pinned by commit SHA (not mutable tags); `release-build.yml` attests build provenance for `dist/*` via `actions/attest-build-provenance` |
+| `install.sh` | ✅ | Checksum verification is now mandatory (aborts if unavailable, undownloadable, or missing an entry — previously silently skipped); installs via `install -o root -g root -m 0755` instead of `mv`, so the binary isn't left owned by the invoking user |
+| `govulncheck` findings (run 2026-07-05) | 🔧 | **GO-2026-5746** (`github.com/docker/docker` — `PUT /containers/{id}/archive` executes container binary on host) in both modules, pulled in transitively via k3d/kind's Docker client use. **Fixed in: N/A** — no patched version exists upstream yet. `ci.yml`'s govulncheck step is `continue-on-error: true` for this reason (a permanently-red required check trains people to ignore CI); revisit once a fix ships. |
 
-**OS detection:**
-- Linux: read `/etc/os-release` for distro name; detect WSL2 via `/proc/version` containing `microsoft`
-- macOS: `runtime.GOOS == "darwin"`; check for Homebrew at `/opt/homebrew/bin/brew` or `/usr/local/bin/brew`
-
-**Behavior:**
-- Prints a status line per tool: `✓ k3d v5.8.3` or `✗ k3d — not found, installing...`
-- Skips anything already on `$PATH` at the required version
-- Docker is never auto-installed — prints a clear message with distro-specific install links
-- `--dry-run` flag: prints what would be installed without executing anything
-
-**Implementation:**
-- New file `kluster/cmd/setup.go` — all logic is CLI-side; no library changes needed
-- Tool checks via `exec.LookPath` + version subprocess
-- Install execution via `exec.Command` (curl pipe to bash, or brew)
-- Platform detection via `runtime.GOOS` + `os.ReadFile("/etc/os-release")`

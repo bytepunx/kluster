@@ -47,6 +47,11 @@ func (p *K3dProvider) Create(ctx context.Context, cfg ClusterConfig) error {
 		ObjectMeta: k3dconfigtypes.ObjectMeta{Name: cfg.Name},
 		Servers:    1,
 		Image:      image,
+		// Without this, k3d defaults to binding the API server load balancer
+		// port on 0.0.0.0 (k3d.DefaultAPIHost) — reachable from the local
+		// network, not just this machine. TLS + client-cert auth still gate
+		// access, but a dev cluster has no business being network-reachable.
+		ExposeAPI: k3dconf.SimpleExposureOpts{HostIP: "127.0.0.1"},
 		Options: k3dconf.SimpleConfigOptions{
 			K3dOptions: k3dconf.SimpleConfigOptionsK3d{
 				Wait:    true,
@@ -182,7 +187,9 @@ func fixKubeconfigServerPort(ctx context.Context, clusterName string, kc *client
 	}
 	hostIP := bindings[0].HostIP
 	if hostIP == "" {
-		hostIP = k3d.DefaultAPIHost
+		// A client can't dial 0.0.0.0 (k3d.DefaultAPIHost); loopback is the
+		// correct fallback since we always request ExposeAPI.HostIP=127.0.0.1.
+		hostIP = "127.0.0.1"
 	}
 	serverURL := fmt.Sprintf("https://%s:%s", hostIP, bindings[0].HostPort)
 	for _, ci := range kc.Clusters {

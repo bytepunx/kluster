@@ -16,6 +16,7 @@ var downCmd = &cobra.Command{
 func init() {
 	rootCmd.AddCommand(downCmd)
 	downCmd.Flags().String("name", "", "Cluster name")
+	downCmd.Flags().BoolP("yes", "y", false, "Skip the confirmation prompt (for CI/scripts)")
 }
 
 func runDown(cmd *cobra.Command, _ []string) error {
@@ -23,6 +24,14 @@ func runDown(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+
+	if src := nameFromRepoLocalConfig(cmd); src != "" {
+		yes, _ := cmd.Flags().GetBool("yes")
+		if !yes && !confirm(cmd, fmt.Sprintf("Destroy cluster %q? (name came from %s, not --name)", name, src)) {
+			return fmt.Errorf("aborted")
+		}
+	}
+
 	p, err := resolveProvider()
 	if err != nil {
 		return err

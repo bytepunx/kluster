@@ -50,6 +50,7 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 | Registry (`Register` / `Get` / `All`) | ✅ | `addon/addon.go` |
 | `cert-manager` | ✅ | Helm install (charts.jetstack.io), CRD enable, poll 3 deployments |
 | `spire` | ✅ | spiffe/spire umbrella chart; polls StatefulSet + DaemonSet + Deployment; version-pinned |
+| `signet` | ✅ | Signet's own OCI chart (`oci://ghcr.io/bytepunx/charts/signet`); pre-seeds auto-unseal master-key Secret + in-cluster CockroachDB; overrides SPIRE socket path/filename to match the `spire` addon's actual layout; `Ready()` confirms unseal via pod logs, not just Deployment-ready. Not in `versions.Catalog` (OCI, no index.yaml) |
 | `traefik-tls` | ✅ | On k3d: configures bundled Traefik; on kind: Helm-installs Traefik first (hookOnly wait), then applies ClusterIssuer + Certificate + TLSStore |
 | `rabbitmq` | ✅ | bitnami/rabbitmq, single-node, no persistence, polls StatefulSet |
 | `dex` | ✅ | dex/dex chart, in-memory storage, static AuthStar client + admin user |
@@ -67,8 +68,9 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 |---|---|---|
 | `Profile` interface | ✅ | `profile/profile.go` |
 | Registry (`Register` / `Get` / `All`) | ✅ | `profile/profile.go` |
-| `spire` | ✅ | SPIFFE/SPIRE workload identity (not Signet itself — see `signet` in Upcoming Features). Applies ClusterSPIFFEID `kluster-workload` via SSA; trust domain from config |
-| `authstar` | ✅ | no-op Configure (pre-seeded via Helm values); note for future RabbitMQ/Dex wiring |
+| `spire` | ✅ | SPIFFE/SPIRE workload identity (not Signet itself). Applies ClusterSPIFFEID `kluster-workload` via SSA; trust domain from config |
+| `signet` | ✅ | Requires `spire`; installs the `signet` addon; no-op Configure (spire profile's catch-all ClusterSPIFFEID already covers Signet's own workload) |
+| `authstar` | ✅ | Requires `signet`; no-op Configure (pre-seeded via Helm values); note for future RabbitMQ/Dex wiring |
 | `observability` | ✅ | prometheus + grafana; registered via init() |
 | `tracing` | ✅ | loki + tempo; registered via init() |
 
@@ -122,13 +124,6 @@ Legend: ✅ done · 🔧 in progress · ⬜ not started · 🏗 stub only
 ---
 
 ## Upcoming Features
-
-### `signet` profile ⬜
-
-Installs Signet itself, on top of the `spire` profile, using Signet's own Helm
-chart and installation instructions (see the `signet` repo's `deploy/helm/signet`
-chart and `docs/installation.md` / `docs/getting-started.md`). Not started —
-`authstar` currently depends on `spire` directly as a placeholder for this.
 
 ### Config file (`kluster.yaml`)
 

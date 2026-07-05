@@ -10,8 +10,8 @@ import (
 
 // SpireProfile bootstraps SPIFFE/SPIRE workload identity plus the cert-manager
 // and Traefik TLS plumbing built on top of it. It does not install Signet
-// itself — that is the separate (not yet implemented) "signet" profile, which
-// will depend on this one for workload identity.
+// itself — see the separate "signet" profile, which depends on this one for
+// workload identity.
 type SpireProfile struct{}
 
 var _ Profile = (*SpireProfile)(nil)

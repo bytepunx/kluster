@@ -143,13 +143,12 @@ jobs:
 
 ## Profiles
 
-Profiles declare a set of addons and any post-install configuration. They are composable — `authstar` builds on top of `spire`.
+Profiles declare a set of addons and any post-install configuration. They are composable — `signet` builds on top of `spire`, and `authstar` builds on top of `signet`.
 
-> **`spire` vs. Signet:** the `spire` profile installs the SPIFFE/SPIRE workload
-> identity substrate — it does **not** install [Signet](https://github.com/bytepunx/signet)
-> itself. A dedicated `signet` profile (built on Signet's own Helm chart) does
-> not exist yet; this profile was previously named `signet` and was renamed to
-> `spire` to avoid that confusion.
+> **`spire` vs. `signet`:** the `spire` profile installs the SPIFFE/SPIRE workload
+> identity substrate; the `signet` profile installs [Signet](https://github.com/bytepunx/signet)
+> itself on top of it. `spire` was previously (and confusingly) named `signet`
+> before this distinction existed.
 
 ### `spire`
 
@@ -168,9 +167,24 @@ SPIFFE trust domain defaults to `dev.cluster.local`. Override with `--trust-doma
 kluster up --profile spire --name dev-spire --trust-domain myteam.local
 ```
 
+### `signet`
+
+Composes the `spire` profile and installs Signet itself, pulled directly from Signet's published OCI Helm chart:
+
+| Component | Purpose |
+|---|---|
+| **Signet** | SPIFFE-native configuration and secrets management |
+| **CockroachDB** | In-cluster, single-node (dev-only; disable for a real backend) |
+
+Fully unattended: kluster generates Signet's master key and audit-chain key and pre-seeds the Kubernetes Secret Signet's auto-unseal mode reads, so the deployment comes up already unsealed — no `signet init` step required. Not for production use; it exists purely so a local test cluster is immediately usable.
+
+```bash
+kluster up --profile signet --name dev-signet
+```
+
 ### `authstar`
 
-Composes the `spire` profile and additionally installs:
+Composes the `signet` profile and additionally installs:
 
 | Component | Purpose |
 |---|---|
@@ -232,7 +246,7 @@ kluster up [flags]
 | Flag | Default | Description |
 |---|---|---|
 | `--name` | *(from `kluster.yaml` or required)* | Cluster name |
-| `--profile` | `spire` | Profile to install: `spire`, `authstar` |
+| `--profile` | `spire` | Profile to install: `spire`, `signet`, `authstar` |
 | `--addon` | | Additional opt-in addons: `observability`, `tracing`, `argocd`. Repeatable. |
 | `--trust-domain` | `dev.cluster.local` | SPIFFE trust domain |
 | `--k3s-version` | latest stable | k3s version tag (k3d only; ignored by kind) |

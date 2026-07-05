@@ -74,11 +74,11 @@ The TypeScript ecosystem is strong for building workloads that run *inside* Kube
 ```
 ┌─────────────────────────────────────────────────────┐
 │                   Named Profiles                    │
-│          spire | authstar | observability           │
+│      spire | signet | authstar | observability      │
 ├─────────────────────────────────────────────────────┤
 │               Platform Addons (opt-in)              │
-│   spire | cert-manager | traefik-tls | rabbitmq     │
-│           dex | prometheus | grafana                │
+│  spire | signet | cert-manager | traefik-tls        │
+│      rabbitmq | dex | prometheus | grafana          │
 │                   loki | tempo                      │
 ├─────────────────────────────────────────────────────┤
 │                    Core (always)                    │
@@ -96,12 +96,12 @@ The TypeScript ecosystem is strong for building workloads that run *inside* Kube
 
 **Profiles** are named compositions of addons. They declare which addons are required and provide profile-specific configuration (Helm values overrides, registration entries, scaffolded CRs). Profiles may depend on other profiles.
 
-**Named Profiles** are the user-facing entrypoints: `spire`, `authstar`, `observability`, `tracing`.
+**Named Profiles** are the user-facing entrypoints: `spire`, `signet`, `authstar`, `observability`, `tracing`.
 
 > **Naming note:** `spire` installs SPIFFE/SPIRE workload identity — it is a
-> prerequisite for Signet, not Signet itself. This profile was originally
-> named `signet`, which conflated the two; it was renamed to `spire` to leave
-> room for a real `signet` profile (built on Signet's own Helm chart) later.
+> prerequisite for Signet, not Signet itself. This profile was originally named
+> `signet`, which conflated the two; it was renamed to `spire` to leave room for
+> the real `signet` profile (built on Signet's own Helm chart, see below).
 
 ### Module structure
 
@@ -117,6 +117,7 @@ kluster/
 │   │   ├── addon.go              # Addon interface + registry
 │   │   ├── certmanager.go        # cert-manager Helm addon
 │   │   ├── spire.go              # SPIRE Server + Agent + Controller Manager
+│   │   ├── signet.go             # Signet itself (OCI chart, auto-unseal)
 │   │   ├── traefik.go            # Traefik TLS via cert-manager
 │   │   ├── rabbitmq.go           # RabbitMQ + management UI
 │   │   ├── dex.go                # Dex OIDC provider
@@ -125,7 +126,8 @@ kluster/
 │   ├── profile/
 │   │   ├── profile.go            # Profile interface + dependency resolver
 │   │   ├── spire.go              # SPIFFE/SPIRE workload identity profile
-│   │   ├── authstar.go           # AuthStar profile (depends on spire)
+│   │   ├── signet.go             # Signet profile (depends on spire)
+│   │   ├── authstar.go           # AuthStar profile (depends on signet)
 │   │   ├── observability.go      # Observability opt-in profile
 │   │   └── tracing.go            # Tracing opt-in profile
 │   └── cluster/
@@ -247,7 +249,7 @@ The `cluster` package resolves addon installation order via topological sort ove
 
 ### `spire` profile
 
-**Purpose:** Bootstraps SPIFFE/SPIRE workload identity — a prerequisite for Signet, but **not** Signet itself. Signet uses SPIFFE SVIDs for caller identity, so the SPIRE stack must be fully functional with real SVID issuance before Signet can be deployed on top of it. A dedicated `signet` profile that installs Signet's own Helm chart does not exist yet; this profile was previously named `signet`, which conflated the identity substrate with the product, and was renamed to `spire` to make room for a real `signet` profile later.
+**Purpose:** Bootstraps SPIFFE/SPIRE workload identity — a prerequisite for Signet, but **not** Signet itself. Signet uses SPIFFE SVIDs for caller identity, so the SPIRE stack must be fully functional with real SVID issuance before Signet can be deployed on top of it. This profile was previously named `signet`, which conflated the identity substrate with the product; it was renamed to `spire` to make room for the real `signet` profile below.
 
 **Addon stack (in installation order):**
 
@@ -267,13 +269,30 @@ The `cluster` package resolves addon installation order via topological sort ove
 - **SVID extraction:** The SPIFFE Workload API socket is mounted into workload containers via the CSI driver (`spiffe.io/csi-driver`) or a SPIFFE helper sidecar. Both approaches are tested locally. Real SVID issuance is required — mocked SVIDs are not sufficient for Signet testing.
 - **Trust domain default:** `dev.cluster.local` (overridable via `ClusterConfig.TrustDomain`).
 
-### `authstar` profile
+### `signet` profile
 
-**Purpose:** Bootstraps everything required for AuthStar. AuthStar depends on Signet for secrets and configuration; until a dedicated `signet` profile exists, `authstar` declares `spire` as its required profile instead (the identity substrate Signet itself would depend on).
+**Purpose:** Installs Signet itself, on top of the `spire` profile's SPIFFE/SPIRE identity substrate.
 
 **Required profiles:** `spire`
 
-**Additional addon stack (installed after spire addons):**
+**Addon stack:** `signet` — pulls Signet's own Helm chart directly (`oci://ghcr.io/bytepunx/charts/signet`), rather than hand-rolled manifests. Configures Signet for a fully unattended dev install:
+
+- **In-cluster CockroachDB** (`cockroachdb.enabled: true`) — no external database dependency.
+- **Auto-unseal, pre-seeded.** Signet's Kubernetes auto-unseal mode reads a 32-byte master key from a Secret (`master.key` field) at startup. The addon generates that key with `crypto/rand` and creates the Secret via client-go *before* installing the chart, so signetd starts already unsealed — no `signet init` CLI/gRPC round trip. The key is never regenerated if the Secret already exists (rotating it would orphan every secret already encrypted under the old key).
+- **Audit chain key** generated fresh per install (32 random bytes, hex-encoded) and passed via Helm values.
+- **SPIRE socket path/filename overrides.** Signet's chart defaults (`spire.socketHostPath: /run/spire/sockets`, socket filename `agent.sock`) don't match where the `spiffe/spire` chart (used by the `spire` addon) actually puts the agent's workload API socket (`/run/spire/agent-sockets/spire-agent.sock`). The addon overrides both `spire.socketHostPath` and `signet.spireSocket` to the real values.
+
+**`Ready()` note:** the Deployment's readiness probe is a bare TCP check and does not reflect seal state, so `Ready()` additionally tails the signetd pod's logs for its unseal-confirmation line rather than trusting pod-Ready alone — the same rigor the `spire` addon applies to real SVID issuance (no mocked success signals).
+
+**Not pinned via `versions.Catalog`.** kluster's chart-version pinning (`kluster charts list`/`update`) fetches classic Helm repo `index.yaml` files; OCI registries don't serve one, so Signet's chart version isn't tracked there. It resolves to whatever's latest in the OCI registry at install time.
+
+### `authstar` profile
+
+**Purpose:** Bootstraps everything required for AuthStar. AuthStar depends on Signet for secrets and configuration, so the `authstar` profile declares `signet` as its required profile.
+
+**Required profiles:** `signet`
+
+**Additional addon stack (installed after signet's addons):**
 
 1. `rabbitmq` — Single-node RabbitMQ with the management UI enabled. Deployed via the Bitnami Helm chart. Exposes management UI at a predictable local port.
 2. `dex` — Local OIDC provider for end-to-end OIDC flow testing. Configured with a static client matching AuthStar's expected OIDC client credentials.
@@ -317,7 +336,7 @@ The `cluster` package resolves addon installation order via topological sort ove
 
 Components installed:
 - **SPIRE Server** — StatefulSet, ClusterIP service, configmap with trust domain and K8s SAT attestation plugin config
-- **SPIRE Agent** — DaemonSet, mounts hostPath socket at `/run/spire/sockets/agent.sock`
+- **SPIRE Agent** — DaemonSet, mounts hostPath socket at `/run/spire/agent-sockets/spire-agent.sock` (the chart's actual default — verified against upstream `spiffe/spire` chart source)
 - **SPIRE Controller Manager** — Deployment, watches `ClusterSPIFFEID` CRDs, manages registration entry lifecycle
 - **SPIFFE CSI Driver** — DaemonSet, mounts the Workload API socket into pods via CSI volume
 
@@ -328,6 +347,22 @@ Helm chart: `spiffe/spire` (official SPIFFE Helm chart repo)
 2. Wait for SPIRE Agent daemonset to have all nodes ready
 3. Wait for SPIRE Controller Manager deployment to be available
 4. Exec a `spire-server healthcheck` via the server pod to confirm the trust bundle is initialized
+
+### `signet`
+
+Helm chart: `oci://ghcr.io/bytepunx/charts/signet` (Signet's own published OCI chart — pulled directly, no repo-add step needed for OCI refs)
+
+`Install()`:
+1. Ensure the `signet` namespace exists (must precede step 2)
+2. Create the `signet-master-key` Secret if absent — 32 random bytes (`crypto/rand`) under field `master.key`; never overwritten on subsequent installs
+3. Generate a fresh audit-chain key (32 random bytes, hex)
+4. Helm install/upgrade with `cockroachdb.enabled: true`, `autoUnseal.enabled: true` pointed at the pre-created Secret, and the `spire.socketHostPath` / `signet.spireSocket` overrides described above
+
+`Ready()`:
+1. Wait for the `signet` Deployment to reach `ReadyReplicas >= 1` (the chart's own init container already blocks this on CockroachDB being reachable)
+2. Tail the signetd pod's logs and require its unseal-confirmation line — the readiness probe alone is a bare TCP check and doesn't reflect seal state
+
+`Uninstall()`: Helm uninstall only — namespace and secrets are left behind, consistent with every other addon (the whole cluster is disposable).
 
 ### `traefik-tls`
 
@@ -363,7 +398,7 @@ The CLI is a thin Cobra application. It parses flags, constructs a `ClusterConfi
 ```
 kluster up [flags]
   --name        string   Cluster name (required)
-  --profile     string   Profile to activate: spire, authstar (default: spire)
+  --profile     string   Profile to activate: spire, signet, authstar (default: spire)
   --addon       strings  Additional opt-in addons: observability, tracing
   --trust-domain string  SPIFFE trust domain (default: dev.cluster.local)
   --k3s-version string   k3s version tag (default: latest stable)
@@ -385,6 +420,9 @@ kluster kubeconfig [flags]
 ```bash
 # SPIFFE/SPIRE workload identity development cluster
 kluster up --name dev-spire --profile spire
+
+# Signet development cluster
+kluster up --name dev-signet --profile signet
 
 # AuthStar development cluster with observability
 kluster up --name dev-authstar --profile authstar --addon observability

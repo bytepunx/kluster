@@ -31,10 +31,10 @@ kluster-lib's `spire` profile (`kluster-lib/profile/spire.go`) bootstraps the SP
 - Traefik with TLS termination via cert-manager integration
 - Trust domain: `dev.cluster.local` (configurable)
 
-A dedicated `signet` profile — installing Signet's own Helm chart on top of `spire`, per Signet's own installation docs — does not exist yet. This profile was previously (and confusingly) named `signet`; it was renamed to `spire` to leave room for a real `signet` profile later. Until that profile exists, do not reuse the name `signet` for anything other than the future Signet-chart profile.
+The `signet` profile (`kluster-lib/profile/signet.go`, requires `spire`) installs Signet itself, via the `signet` addon (`kluster-lib/addon/signet.go`), which pulls Signet's own Helm chart directly from `oci://ghcr.io/bytepunx/charts/signet`. It pre-creates the Kubernetes Secret Signet's auto-unseal mode reads (a random 32-byte key, field `master.key`) so signetd comes up already unsealed with no `signet init` CLI/gRPC step, generates a fresh audit-chain key, and runs Signet's in-cluster CockroachDB (`cockroachdb.enabled: true`) — all dev-only conveniences, not something you'd do in production. It also overrides two Helm values that don't match between the `spire` and `signet` charts by default: `spire.socketHostPath` (the real SPIRE agent socket directory when installed via the `spiffe/spire` chart is `/run/spire/agent-sockets`, not Signet chart's default `/run/spire/sockets`) and `signet.spireSocket` (the real socket filename is `spire-agent.sock`, not the chart's default `agent.sock`).
 
 ### AuthStar
-AuthStar is a modular authentication, authorization, and subscription management platform. It depends on Signet for secrets and configuration. Today the `authstar` profile composes the `spire` profile as a dependency (since there is no `signet` profile yet) — once one exists, `authstar` should depend on `signet` instead. `authstar` additionally installs:
+AuthStar is a modular authentication, authorization, and subscription management platform. It depends on Signet for secrets and configuration — the `authstar` profile composes the `signet` profile as a dependency, then additionally installs:
 - RabbitMQ (single-node + management UI)
 - Dex (local OIDC provider for end-to-end OIDC flow testing)
 - AuthStar-specific Helm values and RBAC
@@ -44,9 +44,9 @@ AuthStar provides its own reverse proxy for ingress, so no additional ingress co
 ## Architecture layers
 
 ```
-Named Profiles          (authstar, spire, observability, tracing)
+Named Profiles          (authstar, signet, spire, observability, tracing)
     ↓ composes
-Platform Addons         (spire, cert-manager, traefik-tls, rabbitmq, dex, ...)
+Platform Addons         (signet, spire, cert-manager, traefik-tls, rabbitmq, dex, ...)
     ↓ installs into
 Core                    (CNI, CoreDNS, metrics-server, local-path-provisioner)
     ↓ runs on
@@ -66,6 +66,7 @@ kluster/
 │   │   ├── addon.go              # Addon interface + registry
 │   │   ├── certmanager.go
 │   │   ├── spire.go
+│   │   ├── signet.go             # Signet itself (OCI chart, auto-unseal)
 │   │   ├── traefik.go
 │   │   ├── rabbitmq.go
 │   │   ├── dex.go
@@ -74,6 +75,7 @@ kluster/
 │   ├── profile/
 │   │   ├── profile.go            # Profile interface + dependency graph
 │   │   ├── spire.go              # SPIFFE/SPIRE workload identity (not Signet itself)
+│   │   ├── signet.go             # Signet profile (requires spire)
 │   │   ├── authstar.go
 │   │   ├── observability.go
 │   │   └── tracing.go
@@ -113,10 +115,11 @@ kluster/
 
 ```bash
 kluster up --profile spire --name dev-spire
+kluster up --profile signet --name dev-signet
 kluster up --profile authstar --addon observability --name dev-authstar
 kluster down --name dev-authstar
 kluster status
-kluster kubeconfig --name dev-spire
+kluster kubeconfig --name dev-signet
 ```
 
 ## What is explicitly out of scope (for now)

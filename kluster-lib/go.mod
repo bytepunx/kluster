@@ -7,7 +7,7 @@ require (
 	github.com/docker/docker v28.5.2+incompatible
 	github.com/docker/go-connections v0.7.0
 	github.com/k3d-io/k3d/v5 v5.9.0
-	github.com/mittwald/go-helm-client v0.13.1
+	github.com/mittwald/go-helm-client v0.13.2
 	github.com/sirupsen/logrus v1.9.4
 	golang.org/x/crypto v0.53.0
 	gopkg.in/yaml.v3 v3.0.1

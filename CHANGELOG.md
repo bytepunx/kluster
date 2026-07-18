@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/bytepunx/kluster/compare/v1.0.2...v1.1.0) (2026-07-18)
+
+
+### Features
+
+* add signet addon and profile ([7701aea](https://github.com/bytepunx/kluster/commit/7701aea22be10e8067e106cf67011465e80debfe))
+
+
+### Bug Fixes
+
+* address security and documentation-gap review ([38cc943](https://github.com/bytepunx/kluster/commit/38cc943422d0c60cdf674847a250f15448edf6da))
+* correct lint tooling and outstanding format and lint issues ([d803cf0](https://github.com/bytepunx/kluster/commit/d803cf033725136cf1efd6ede8dd10a4742a7fe0))
+
 ## [1.0.2](https://github.com/bytepunx/kluster/compare/v1.0.1...v1.0.2) (2026-06-30)
 
 

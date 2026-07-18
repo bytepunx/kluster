@@ -12,7 +12,6 @@ import (
 	_ "github.com/bytepunx/kluster-lib/profile"
 )
 
-
 var upCmd = &cobra.Command{
 	Use:   "up",
 	Short: "Create and configure a new cluster",

@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	helmclient "github.com/mittwald/go-helm-client"
 	"github.com/bytepunx/kluster-lib/provider"
+	helmclient "github.com/mittwald/go-helm-client"
 	apimeta "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/client-go/discovery"
 	memory "k8s.io/client-go/discovery/cached/memory"

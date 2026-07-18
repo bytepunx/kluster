@@ -37,7 +37,8 @@ func initConfig() {
 }
 
 // stringFlag returns the value for a string flag, following the precedence:
-//   flag (if explicitly set) > config file > flag default
+//
+//	flag (if explicitly set) > config file > flag default
 func stringFlag(cmd *cobra.Command, flagName, configKey string) string {
 	if cmd.Flags().Changed(flagName) {
 		v, _ := cmd.Flags().GetString(flagName)

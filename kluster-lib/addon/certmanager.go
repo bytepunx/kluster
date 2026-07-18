@@ -39,7 +39,7 @@ var _ Addon = (*CertManagerAddon)(nil)
 
 func init() { Register(&CertManagerAddon{}) }
 
-func (*CertManagerAddon) Name() string     { return "cert-manager" }
+func (*CertManagerAddon) Name() string       { return "cert-manager" }
 func (*CertManagerAddon) Requires() []string { return nil }
 
 func (*CertManagerAddon) Install(ctx context.Context, h ClusterHandle) error {

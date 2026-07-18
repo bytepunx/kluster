@@ -60,7 +60,7 @@ var _ Addon = (*DexAddon)(nil)
 
 func init() { Register(&DexAddon{}) }
 
-func (*DexAddon) Name() string      { return "dex" }
+func (*DexAddon) Name() string       { return "dex" }
 func (*DexAddon) Requires() []string { return []string{"traefik-tls"} }
 
 func (*DexAddon) Install(ctx context.Context, h ClusterHandle) error {

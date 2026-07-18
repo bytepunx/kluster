@@ -17,8 +17,8 @@ type fakeAddon struct {
 	requires []string
 }
 
-func (f *fakeAddon) Name() string                                        { return f.name }
-func (f *fakeAddon) Requires() []string                                  { return f.requires }
+func (f *fakeAddon) Name() string                                             { return f.name }
+func (f *fakeAddon) Requires() []string                                       { return f.requires }
 func (f *fakeAddon) Install(_ context.Context, _ addon.ClusterHandle) error   { return nil }
 func (f *fakeAddon) Uninstall(_ context.Context, _ addon.ClusterHandle) error { return nil }
 func (f *fakeAddon) Ready(_ context.Context, _ addon.ClusterHandle) error     { return nil }

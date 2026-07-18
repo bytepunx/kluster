@@ -6,9 +6,9 @@ import (
 	"time"
 
 	helmclient "github.com/mittwald/go-helm-client"
+	"golang.org/x/crypto/bcrypt"
 	helmaction "helm.sh/helm/v4/pkg/action"
 	helmrepo "helm.sh/helm/v4/pkg/repo/v1"
-	"golang.org/x/crypto/bcrypt"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -73,7 +73,7 @@ var _ Addon = (*ArgoCDAddon)(nil)
 
 func init() { Register(&ArgoCDAddon{}) }
 
-func (*ArgoCDAddon) Name() string      { return "argocd" }
+func (*ArgoCDAddon) Name() string       { return "argocd" }
 func (*ArgoCDAddon) Requires() []string { return []string{"traefik-tls"} }
 
 func (*ArgoCDAddon) Install(ctx context.Context, h ClusterHandle) error {

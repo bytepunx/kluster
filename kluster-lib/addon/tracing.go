@@ -52,7 +52,7 @@ var _ Addon = (*LokiAddon)(nil)
 
 func init() { Register(&LokiAddon{}) }
 
-func (*LokiAddon) Name() string      { return "loki" }
+func (*LokiAddon) Name() string       { return "loki" }
 func (*LokiAddon) Requires() []string { return nil }
 
 func (*LokiAddon) Install(ctx context.Context, h ClusterHandle) error {
@@ -133,7 +133,7 @@ var _ Addon = (*TempoAddon)(nil)
 
 func init() { Register(&TempoAddon{}) }
 
-func (*TempoAddon) Name() string      { return "tempo" }
+func (*TempoAddon) Name() string       { return "tempo" }
 func (*TempoAddon) Requires() []string { return nil }
 
 func (*TempoAddon) Install(ctx context.Context, h ClusterHandle) error {

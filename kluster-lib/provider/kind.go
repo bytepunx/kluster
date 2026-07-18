@@ -9,10 +9,10 @@ import (
 
 	dockercontainer "github.com/docker/docker/api/types/container"
 	dockerclient "github.com/docker/docker/client"
-	kindcluster "sigs.k8s.io/kind/pkg/cluster"
-	kindlog "sigs.k8s.io/kind/pkg/log"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	kindcluster "sigs.k8s.io/kind/pkg/cluster"
+	kindlog "sigs.k8s.io/kind/pkg/log"
 )
 
 // KindProvider uses kind (Kubernetes IN Docker) for CI-optimised clusters.

@@ -55,7 +55,7 @@ var _ Addon = (*SignetAddon)(nil)
 
 func init() { Register(&SignetAddon{}) }
 
-func (*SignetAddon) Name() string      { return "signet" }
+func (*SignetAddon) Name() string       { return "signet" }
 func (*SignetAddon) Requires() []string { return []string{"spire"} }
 
 func (*SignetAddon) Install(ctx context.Context, h ClusterHandle) error {

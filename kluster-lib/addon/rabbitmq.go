@@ -42,7 +42,7 @@ var _ Addon = (*RabbitMQAddon)(nil)
 
 func init() { Register(&RabbitMQAddon{}) }
 
-func (*RabbitMQAddon) Name() string      { return "rabbitmq" }
+func (*RabbitMQAddon) Name() string       { return "rabbitmq" }
 func (*RabbitMQAddon) Requires() []string { return nil }
 
 func (*RabbitMQAddon) Install(ctx context.Context, h ClusterHandle) error {

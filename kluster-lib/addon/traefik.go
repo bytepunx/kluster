@@ -30,7 +30,7 @@ var _ Addon = (*TraefikTLSAddon)(nil)
 
 func init() { Register(&TraefikTLSAddon{}) }
 
-func (*TraefikTLSAddon) Name() string      { return "traefik-tls" }
+func (*TraefikTLSAddon) Name() string       { return "traefik-tls" }
 func (*TraefikTLSAddon) Requires() []string { return []string{"cert-manager"} }
 
 const (
@@ -201,6 +201,7 @@ func installTraefikHelm(ctx context.Context, h ClusterHandle) error {
 		WaitStrategy:    "hookOnly",
 		DryRunStrategy:  helmaction.DryRunNone,
 		Timeout:         2 * time.Minute,
+		ValuesYaml:      traefikHelmValues,
 	}, nil)
 	if err != nil {
 		return fmt.Errorf("traefik-tls: helm install traefik: %w", err)

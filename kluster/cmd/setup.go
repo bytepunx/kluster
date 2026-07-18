@@ -33,10 +33,10 @@ func init() {
 }
 
 type tool struct {
-	name        string
-	check       func() (string, bool) // returns (version, found)
-	install     func(platform) error
-	dockerOnly  bool // true = never auto-install, print instructions instead
+	name       string
+	check      func() (string, bool) // returns (version, found)
+	install    func(platform) error
+	dockerOnly bool // true = never auto-install, print instructions instead
 }
 
 func runSetup(cmd *cobra.Command, _ []string) error {

@@ -46,7 +46,7 @@ var _ Addon = (*PrometheusAddon)(nil)
 
 func init() { Register(&PrometheusAddon{}) }
 
-func (*PrometheusAddon) Name() string      { return "prometheus" }
+func (*PrometheusAddon) Name() string       { return "prometheus" }
 func (*PrometheusAddon) Requires() []string { return nil }
 
 func (*PrometheusAddon) Install(ctx context.Context, h ClusterHandle) error {
@@ -140,7 +140,7 @@ var _ Addon = (*GrafanaAddon)(nil)
 
 func init() { Register(&GrafanaAddon{}) }
 
-func (*GrafanaAddon) Name() string      { return "grafana" }
+func (*GrafanaAddon) Name() string       { return "grafana" }
 func (*GrafanaAddon) Requires() []string { return []string{"prometheus"} }
 
 func (*GrafanaAddon) Install(ctx context.Context, h ClusterHandle) error {

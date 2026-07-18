@@ -30,7 +30,7 @@ var _ Addon = (*SpireAddon)(nil)
 
 func init() { Register(&SpireAddon{}) }
 
-func (*SpireAddon) Name() string      { return "spire" }
+func (*SpireAddon) Name() string       { return "spire" }
 func (*SpireAddon) Requires() []string { return []string{"cert-manager"} }
 
 func (*SpireAddon) Install(ctx context.Context, h ClusterHandle) error {

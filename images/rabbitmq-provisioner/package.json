@@ -1,0 +1,16 @@
+{
+  "name": "@bytepunx/rabbitmq-provisioner",
+  "version": "0.1.0",
+  "private": true,
+  "description": "One-shot/CronJob provisioner for RabbitMQ per-service credentials, per authstar ADR 0012.",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@bytepunx/signet-client": "file:./signet-client.tgz",
+    "@grpc/grpc-js": "^1.10.0",
+    "@kubernetes/client-node": "1.4.0"
+  }
+}

@@ -1,0 +1,82 @@
+name: Build and publish images
+
+# Publishes the two custom images kluster-lib/addon/rabbitmq.go and
+# kluster-lib/profile/authstar.go reference at fixed tags:
+# bytepunx/rabbitmq-kickr (bitnamilegacy/rabbitmq + kickr as PID 1, see
+# images/rabbitmq-kickr/Dockerfile's own header for why bitnamilegacy, not
+# bitnami) and bytepunx/rabbitmq-provisioner (the ADR 0012 credential
+# Job/CronJob). Neither image was ever wired up here before, despite both
+# addon files describing this exact publish step in their own comments --
+# `kluster up --profile authstar` pulled these tags on every run and always
+# failed with ImagePullBackOff until now.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "images/rabbitmq-kickr/**"
+      - "images/rabbitmq-provisioner/**"
+      - ".github/workflows/images.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "images/rabbitmq-kickr/**"
+      - "images/rabbitmq-provisioner/**"
+      - ".github/workflows/images.yml"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  rabbitmq-kickr:
+    name: rabbitmq-kickr
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: github.event_name == 'push'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Tag is pinned to a fixed value, not derived from git metadata: this
+      # composite image's version is the RABBITMQ_BASE_TAG + kickr version
+      # baked into it (see the Dockerfile's own ARG defaults), which
+      # kluster-lib/addon/rabbitmq.go's rabbitmqKickrImageTag constant must
+      # match byte-for-byte. Bump both together when either input changes.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: images/rabbitmq-kickr
+          push: ${{ github.event_name == 'push' }}
+          tags: bytepunx/rabbitmq-kickr:4.1.3-kickr1.0.0
+          cache-from: type=gha,scope=rabbitmq-kickr
+          cache-to: type=gha,mode=max,scope=rabbitmq-kickr
+
+  rabbitmq-provisioner:
+    name: rabbitmq-provisioner
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        if: github.event_name == 'push'
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Tag pinned for the same reason as rabbitmq-kickr above: must match
+      # kluster-lib/profile/authstar.go's rabbitmqProvisionerImageTag
+      # constant byte-for-byte.
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: images/rabbitmq-provisioner
+          push: ${{ github.event_name == 'push' }}
+          tags: bytepunx/rabbitmq-provisioner:0.1.0
+          cache-from: type=gha,scope=rabbitmq-provisioner
+          cache-to: type=gha,mode=max,scope=rabbitmq-provisioner

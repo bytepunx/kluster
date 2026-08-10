@@ -23,19 +23,18 @@ const (
 	rabbitmqRepoName  = "bitnami"
 	rabbitmqRepoURL   = "https://charts.bitnami.com/bitnami"
 
-	// rabbitmqBaseImageTag is the upstream RabbitMQ version this addon
-	// pins, kept in sync with images/rabbitmq-kickr/Dockerfile's own
-	// RABBITMQ_BASE_TAG build arg default. Broadcom's 2025 restructuring
-	// of Bitnami's Docker Hub distribution removed this pinned tag from
-	// the free "bitnami/*" org (confirmed via `docker manifest inspect
-	// docker.io/bitnami/rabbitmq:4.1.3-debian-12-r1` returning "not
-	// found"); the same tag is still served from the free-but-frozen
-	// "bitnamilegacy/*" org, which images/rabbitmq-kickr builds from.
-	rabbitmqBaseImageTag = "4.1.3-debian-12-r1"
-
 	// rabbitmqKickrImageRepo/Tag identify the composite image built from
 	// images/rabbitmq-kickr/Dockerfile: bitnamilegacy/rabbitmq with kickr
-	// (per ADR 0010) layered in as PID 1. Published to Docker Hub by
+	// (per ADR 0010) layered in as PID 1. The "4.1.3" component of the tag
+	// below is the upstream RabbitMQ version, kept in sync with that
+	// Dockerfile's own RABBITMQ_BASE_TAG build arg default
+	// ("4.1.3-debian-12-r1") — Broadcom's 2025 restructuring of Bitnami's
+	// Docker Hub distribution removed this pinned tag from the free
+	// "bitnami/*" org (confirmed via `docker manifest inspect
+	// docker.io/bitnami/rabbitmq:4.1.3-debian-12-r1` returning "not
+	// found"); the same tag is still served from the free-but-frozen
+	// "bitnamilegacy/*" org, which that Dockerfile builds from. Published
+	// to Docker Hub by
 	// images/rabbitmq-kickr's own CI workflow, mirroring
 	// portcullis/.github/workflows/docker.yml's pattern; not yet pushed as
 	// of this writing; for a fully offline dev loop, `docker build` the

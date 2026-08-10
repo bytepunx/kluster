@@ -262,8 +262,6 @@ func fetchManifest(ctx context.Context, url string) (string, error) {
 // document; this only needs to find the boundaries.
 func splitYAMLDocuments(manifest string) []string {
 	var docs []string
-	for _, doc := range strings.Split(manifest, "\n---") {
-		docs = append(docs, doc)
-	}
+	docs = append(docs, strings.Split(manifest, "\n---")...)
 	return docs
 }

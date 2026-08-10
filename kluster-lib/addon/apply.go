@@ -14,8 +14,14 @@ import (
 )
 
 // ApplyManifest applies a single YAML manifest via server-side apply.
-// The REST mapper re-discovers API groups on cache miss, so it works for
-// CRDs installed by a prior addon in the same Up sequence.
+//
+// On a NoKindMatchError, this forces the REST mapper to re-run discovery
+// (via ClusterHandle.ResetRESTMapper) and retries once — see that field's
+// own doc comment for why this must be done explicitly here rather than
+// trusted to DeferredDiscoveryRESTMapper's own built-in retry, which
+// doesn't actually fire in kluster's case. This is what makes ApplyManifest
+// work for CRDs installed by a prior addon earlier in the same `kluster up`
+// run, not just ones that existed before this process started.
 func ApplyManifest(ctx context.Context, h ClusterHandle, yamlData string) error {
 	jsonData, err := sigsyaml.YAMLToJSON([]byte(yamlData))
 	if err != nil {
@@ -29,6 +35,10 @@ func ApplyManifest(ctx context.Context, h ClusterHandle, yamlData string) error 
 
 	gvk := obj.GroupVersionKind()
 	mapping, err := h.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if apimeta.IsNoMatchError(err) && h.ResetRESTMapper != nil {
+		h.ResetRESTMapper()
+		mapping, err = h.RESTMapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	}
 	if err != nil {
 		return fmt.Errorf("REST mapping for %v: %w", gvk, err)
 	}

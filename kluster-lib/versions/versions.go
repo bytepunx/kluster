@@ -2,6 +2,7 @@ package versions
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,14 +16,29 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Entry describes a single chart managed by kluster.
+// Source distinguishes how an Entry's version is resolved: from a classic
+// Helm repo index.yaml (the default, zero value), or from a GitHub
+// releases feed for addons distributed as a static manifest rather than a
+// Helm chart (e.g. the RabbitMQ Messaging Topology Operator, which ships
+// only "kubectl apply -f <release-asset>.yaml" — no chart, no index.yaml).
+type Source int
+
+const (
+	SourceHelm Source = iota
+	SourceGithubRelease
+)
+
+// Entry describes a single chart (or, for SourceGithubRelease, a static
+// manifest release) managed by kluster.
 type Entry struct {
-	Addon     string // addon name in the kluster registry
-	RepoURL   string // Helm repository base URL
-	ChartName string // chart name within the repository index
+	Addon      string // addon name in the kluster registry
+	Source     Source
+	RepoURL    string // Helm repository base URL (SourceHelm only)
+	ChartName  string // chart name within the repository index (SourceHelm only)
+	GithubRepo string // "owner/repo" (SourceGithubRelease only)
 }
 
-// Catalog lists every chart kluster manages, in display order.
+// Catalog lists every chart/release kluster manages, in display order.
 // Each unique RepoURL is fetched only once during a Fetch call.
 var Catalog = []Entry{
 	{Addon: "cert-manager", RepoURL: "https://charts.jetstack.io", ChartName: "cert-manager"},
@@ -30,6 +46,13 @@ var Catalog = []Entry{
 	{Addon: "traefik", RepoURL: "https://traefik.github.io/charts", ChartName: "traefik"},
 	{Addon: "argocd", RepoURL: "https://argoproj.github.io/argo-helm", ChartName: "argo-cd"},
 	{Addon: "rabbitmq", RepoURL: "https://charts.bitnami.com/bitnami", ChartName: "rabbitmq"},
+	{Addon: "rabbitmq-topology-operator", Source: SourceGithubRelease, GithubRepo: "rabbitmq/messaging-topology-operator"},
+	// rabbitmq-cluster-operator-crds: only the RabbitmqCluster CRD
+	// definition from this separate upstream project is ever applied (see
+	// addon/rabbitmq-topology-operator.go's installRabbitmqClusterCRD) —
+	// pinned independently since it's a different release cadence than
+	// the Topology Operator above.
+	{Addon: "rabbitmq-cluster-operator-crds", Source: SourceGithubRelease, GithubRepo: "rabbitmq/cluster-operator"},
 	{Addon: "postgres", RepoURL: "https://charts.bitnami.com/bitnami", ChartName: "postgresql"},
 	{Addon: "clickhouse", RepoURL: "https://charts.bitnami.com/bitnami", ChartName: "clickhouse"},
 	{Addon: "dex", RepoURL: "https://charts.dexidp.io", ChartName: "dex"},
@@ -82,12 +105,20 @@ func Save(f File) error {
 	return os.WriteFile(Path(), data, 0o600)
 }
 
-// Fetch contacts each repo in Catalog, resolves the latest stable version for
-// each chart, and returns a populated File ready for saving.
-// Each unique RepoURL is fetched exactly once regardless of how many charts share it.
+// Fetch contacts each repo/release feed in Catalog, resolves the latest
+// stable version for each entry, and returns a populated File ready for
+// saving. Each unique Helm RepoURL is fetched exactly once regardless of how
+// many charts share it; GitHub release entries are resolved independently
+// (one API call per repo), since GitHub Releases has no equivalent of a
+// single shared index.yaml to batch against.
 func Fetch(ctx context.Context) (File, error) {
 	byRepo := make(map[string][]Entry)
+	var githubEntries []Entry
 	for _, e := range Catalog {
+		if e.Source == SourceGithubRelease {
+			githubEntries = append(githubEntries, e)
+			continue
+		}
 		byRepo[e.RepoURL] = append(byRepo[e.RepoURL], e)
 	}
 
@@ -95,6 +126,15 @@ func Fetch(ctx context.Context) (File, error) {
 		Updated: time.Now().UTC(),
 		Charts:  make(map[string]string, len(Catalog)),
 	}
+
+	for _, e := range githubEntries {
+		v, err := latestGithubReleaseTag(ctx, e.GithubRepo)
+		if err != nil {
+			return File{}, fmt.Errorf("resolve %s: %w", e.Addon, err)
+		}
+		f.Charts[e.Addon] = v
+	}
+
 	for repoURL, entries := range byRepo {
 		idx, err := fetchIndex(ctx, repoURL)
 		if err != nil {
@@ -198,6 +238,44 @@ func fetchIndex(ctx context.Context, repoURL string) (repoIndex, error) {
 		return repoIndex{}, fmt.Errorf("parse index from %s: %w", repoURL, err)
 	}
 	return idx, nil
+}
+
+// latestGithubReleaseTag resolves the tag_name of a GitHub repo's latest
+// published release, for addons distributed as a static release-asset
+// manifest rather than a Helm chart (see the SourceGithubRelease Entries in
+// Catalog). Unauthenticated GitHub REST API access is rate-limited to 60
+// requests/hour per source IP — acceptable here since this is one call per
+// SourceGithubRelease entry, only made when the local chart-versions.yaml
+// cache is absent (see Ensure()), not on every "kluster up".
+func latestGithubReleaseTag(ctx context.Context, repo string) (string, error) {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/releases/latest", repo)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := indexHTTPClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("HTTP %d from %s", resp.StatusCode, url)
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, maxIndexSize))
+	if err != nil {
+		return "", err
+	}
+	var release struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.Unmarshal(data, &release); err != nil {
+		return "", fmt.Errorf("parse release from %s: %w", url, err)
+	}
+	if release.TagName == "" {
+		return "", fmt.Errorf("no tag_name in latest release from %s", url)
+	}
+	return release.TagName, nil
 }
 
 func latestStable(idx repoIndex, chartName string) (string, error) {

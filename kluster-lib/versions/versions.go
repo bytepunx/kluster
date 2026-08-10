@@ -30,6 +30,8 @@ var Catalog = []Entry{
 	{Addon: "traefik", RepoURL: "https://traefik.github.io/charts", ChartName: "traefik"},
 	{Addon: "argocd", RepoURL: "https://argoproj.github.io/argo-helm", ChartName: "argo-cd"},
 	{Addon: "rabbitmq", RepoURL: "https://charts.bitnami.com/bitnami", ChartName: "rabbitmq"},
+	{Addon: "postgres", RepoURL: "https://charts.bitnami.com/bitnami", ChartName: "postgresql"},
+	{Addon: "clickhouse", RepoURL: "https://charts.bitnami.com/bitnami", ChartName: "clickhouse"},
 	{Addon: "dex", RepoURL: "https://charts.dexidp.io", ChartName: "dex"},
 	{Addon: "prometheus", RepoURL: "https://prometheus-community.github.io/helm-charts", ChartName: "prometheus"},
 	{Addon: "grafana", RepoURL: "https://grafana.github.io/helm-charts", ChartName: "grafana"},

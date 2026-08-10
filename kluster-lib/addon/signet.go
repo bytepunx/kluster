@@ -47,6 +47,38 @@ const (
 	// auto-unseal. Ready() greps for it because the readiness probe is a bare
 	// TCP check on the gRPC port and does not reflect seal state.
 	signetUnsealLogLine = "unsealed via Kubernetes Secret"
+
+	// signetAdminPort is signetd's admin gRPC listener. Until
+	// bytepunx/signet#19, reaching it from anywhere but a human's
+	// `kubectl port-forward` required kluster to hand-roll its own second
+	// Service and NetworkPolicy here (selecting the chart's own pods,
+	// narrowly scoped to the RabbitMQ provisioning Job's ServiceAccount) —
+	// see bytepunx/kluster#20 and git history for that version if it's
+	// ever useful again. Now it's just `admin.clusterAccess: true` in
+	// signetValues below: the chart atomically rebinds the listener off
+	// loopback, adds an "admin" port to its own existing Service (so the
+	// in-cluster DNS name is just signetRelease, e.g.
+	// signet.signet.svc.cluster.local:8444 — no separate Service name to
+	// track), and opens its own NetworkPolicy ingress rule. That rule is
+	// broader than kluster's old narrowly-scoped one (any in-cluster pod,
+	// not just the provisioning Job specifically) — an intentional
+	// tradeoff for one flag instead of ~100 lines of bespoke Service/
+	// NetworkPolicy code: the bearer token required on every admin RPC
+	// (see signet_admin.go's pushSignetSecret) is the actual access
+	// control either way, so the narrower network scoping was
+	// defense-in-depth on top of that, not the boundary itself.
+	//
+	// kluster's own Go code (this package) is a different caller in a
+	// different network position — a host binary, not a cluster
+	// workload — and still cannot dial that in-cluster Service directly (a
+	// *.svc.cluster.local name doesn't resolve from outside the cluster's
+	// pod network); it reaches this same port via a Kubernetes
+	// pods/portforward tunnel instead (see signet_admin.go's
+	// withSignetAdminPortForward), unaffected by any of the above — port-
+	// forward works against whatever interface signetd is actually
+	// listening on. See signet_admin.go's package doc comment for the
+	// full story of why these two callers use different mechanisms.
+	signetAdminPort = 8444
 )
 
 type SignetAddon struct{}
@@ -124,6 +156,13 @@ autoUnseal:
 
 cockroachdb:
   enabled: true
+
+# See signetAdminPort's doc comment: this atomically rebinds the admin
+# listener off loopback, adds an "admin" port to the chart's own Service,
+# and opens its own NetworkPolicy ingress rule -- replacing kluster's old
+# hand-rolled second Service/NetworkPolicy (bytepunx/kluster#20).
+admin:
+  clusterAccess: true
 `, trustDomain, auditChainKey, dbConnString, signetSpireSocketPath,
 		signetSpireSocketHostPath, signetMasterKeySecret)
 }

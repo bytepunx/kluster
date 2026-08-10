@@ -37,8 +37,17 @@ func (*SpireProfile) Addons() []string {
 // registration, matching this tool's goal of a ready-to-use cluster. The
 // exclusion list below only trims addon-installed infrastructure that has no
 // use for a SPIFFE identity (cert-manager, the observability/tracing stack,
-// ArgoCD, Dex, RabbitMQ) — it must NOT include "signet", which dials the
-// SPIRE workload API for its own identity.
+// ArgoCD, Dex) — it must NOT include "signet", which dials the SPIRE
+// workload API for its own identity.
+//
+// "rabbitmq" was removed from this list (ADR 0010/0012): RabbitMQ now runs
+// under kickr (see addon/rabbitmq.go), which needs its own SVID to dial
+// signet for RabbitMQ's bootstrap credential, and the RabbitMQ-namespace
+// provisioning Job (see profile/authstar.go) needs one too, to fetch its own
+// elevated signet admin token. Leaving the namespace registered is harmless
+// for RabbitMQ's own broker process itself, which never requests an SVID —
+// SPIRE only issues one to a workload that actually asks the Workload API
+// for it.
 func (*SpireProfile) Configure(ctx context.Context, h addon.ClusterHandle, cfg provider.ClusterConfig) error {
 	trustDomain := cfg.TrustDomainOrDefault()
 
@@ -61,7 +70,6 @@ spec:
           - monitoring
           - argocd
           - dex
-          - rabbitmq
 `, trustDomain)); err != nil {
 		return fmt.Errorf("spire: apply ClusterSPIFFEID: %w", err)
 	}

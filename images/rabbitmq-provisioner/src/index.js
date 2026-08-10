@@ -311,9 +311,33 @@ async function waitForUserReady(customObjects, service, timeoutMs = 60_000) {
 // minutes after "done" had already logged, with only `node src/index.js`
 // still alive inside it. Explicit process.exit(0) on success mirrors the
 // existing explicit exit on failure below.
+//
+// keepAlive exists for the opposite problem, discovered the hard way after
+// the above fix landed: @bytepunx/signet-client's dialWorkload (used by
+// fetchOwnAdminToken, above) leaves the process with *nothing* holding the
+// event loop open during its very first await — none of the K8s clients'
+// handles exist yet at that point, and the SPIFFE Workload API stream
+// dialWorkload waits on internally does not keep Node alive on its own
+// (verified live: instrumenting every await with synchronous
+// fs.appendFileSync debug lines showed execution consistently stopping
+// mid-dialWorkload, with a clean process "exit" event firing at code 0 —
+// no thrown error, no unhandled rejection, nothing — meaning Node
+// considered the event loop empty and exited, abandoning that still-
+// pending await entirely). A referenced (non-.unref()'d) interval spanning
+// the whole main() call closes that gap deterministically regardless of
+// what any dependency does with its own handles' ref state, and is
+// cleared the instant main() actually settles either way, so it adds no
+// delay to a real success or failure. Filed as
+// bytepunx/signet-clients#47 upstream, since this is a real bug in
+// dialWorkload itself and this is a workaround, not a fix.
+const keepAlive = setInterval(() => {}, 60_000);
 main()
-  .then(() => process.exit(0))
+  .then(() => {
+    clearInterval(keepAlive);
+    process.exit(0);
+  })
   .catch((err) => {
     console.error(`[rabbitmq-provisioner:${MODE}] fatal:`, err);
+    clearInterval(keepAlive);
     process.exit(1);
   });

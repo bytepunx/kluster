@@ -35,6 +35,14 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
 
+      # QEMU + the explicit platforms list below: GitHub-hosted runners are
+      # amd64 only, so without this the pushed manifest has no arm64
+      # variant and every pull from an Apple Silicon dev machine's k3d
+      # cluster 404s with "no match for platform in manifest" (hit for real
+      # standing up a local authstar-integration cluster on an M-series
+      # Mac).
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
@@ -51,6 +59,7 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: images/rabbitmq-kickr
+          platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.event_name == 'push' }}
           tags: bytepunx/rabbitmq-kickr:4.1.3-kickr1.0.0
           cache-from: type=gha,scope=rabbitmq-kickr
@@ -61,6 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
 
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
@@ -76,6 +87,7 @@ jobs:
       - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: images/rabbitmq-provisioner
+          platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
           push: ${{ github.event_name == 'push' }}
           tags: bytepunx/rabbitmq-provisioner:0.1.0
           cache-from: type=gha,scope=rabbitmq-provisioner

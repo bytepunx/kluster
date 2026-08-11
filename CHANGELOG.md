@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/bytepunx/kluster/compare/v1.1.0...v1.2.0) (2026-08-11)
+
+
+### Features
+
+* **rabbitmq-provisioner:** use signet-clients' native plaintext-dial and default retry ([#21](https://github.com/bytepunx/kluster/issues/21)) ([ff25d2d](https://github.com/bytepunx/kluster/commit/ff25d2deebe00984c6e2cfa8824e281df4bb977a))
+
+
+### Bug Fixes
+
+* **rabbitmq-provisioner:** use published signet-client 0.4.1; add missing src/lib.js ([#23](https://github.com/bytepunx/kluster/issues/23)) ([acd3981](https://github.com/bytepunx/kluster/commit/acd39815a2bc44678aa09423281c01dbff056860))
+
 ## [1.1.0](https://github.com/bytepunx/kluster/compare/v1.0.2...v1.1.0) (2026-07-18)
 
 

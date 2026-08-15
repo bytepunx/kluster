@@ -56,7 +56,7 @@ jobs:
       # baked into it (see the Dockerfile's own ARG defaults), which
       # kluster-lib/addon/rabbitmq.go's rabbitmqKickrImageTag constant must
       # match byte-for-byte. Bump both together when either input changes.
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: images/rabbitmq-kickr
           platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
@@ -84,7 +84,7 @@ jobs:
       # Tag pinned for the same reason as rabbitmq-kickr above: must match
       # kluster-lib/profile/authstar.go's rabbitmqProvisionerImageTag
       # constant byte-for-byte.
-      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+      - uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: images/rabbitmq-provisioner
           platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}

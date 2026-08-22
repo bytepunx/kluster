@@ -12,9 +12,9 @@ require (
 	github.com/mittwald/go-helm-client v0.13.2
 	github.com/sirupsen/logrus v1.9.4
 	golang.org/x/crypto v0.54.0
-	google.golang.org/grpc v1.81.1
+	google.golang.org/grpc v1.82.1
 	gopkg.in/yaml.v3 v3.0.1
-	helm.sh/helm/v4 v4.2.3
+	helm.sh/helm/v4 v4.2.4
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
 	k8s.io/client-go v0.36.2

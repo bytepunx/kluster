@@ -12,7 +12,7 @@ require (
 	github.com/mittwald/go-helm-client v0.13.2
 	github.com/sirupsen/logrus v1.9.4
 	golang.org/x/crypto v0.55.0
-	google.golang.org/grpc v1.82.1
+	google.golang.org/grpc v1.83.2
 	gopkg.in/yaml.v3 v3.0.1
 	helm.sh/helm/v4 v4.2.4
 	k8s.io/api v0.36.3
@@ -253,7 +253,7 @@ require (
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
-	golang.org/x/net v0.57.0 // indirect
+	golang.org/x/net v0.58.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

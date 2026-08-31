@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.2.1](https://github.com/bytepunx/kluster/compare/v1.2.0...v1.2.1) (2026-08-31)
+
+
+### Bug Fixes
+
+* set admin.tls.acknowledgeInsecure for signet addon Helm install ([#42](https://github.com/bytepunx/kluster/issues/42)) ([0522ae5](https://github.com/bytepunx/kluster/commit/0522ae5502cd48b07ae0704c6fb4ee920e12fbce)), closes [#40](https://github.com/bytepunx/kluster/issues/40)
+
 ## [1.2.0](https://github.com/bytepunx/kluster/compare/v1.1.0...v1.2.0) (2026-08-11)
 
 

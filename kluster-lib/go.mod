@@ -6,7 +6,7 @@ require (
 	github.com/Masterminds/semver/v3 v3.5.0
 	github.com/bytepunx/signet v0.6.1
 	github.com/docker/docker v28.5.2+incompatible
-	github.com/docker/go-connections v0.7.0
+	github.com/docker/go-connections v0.8.1
 	github.com/getsops/sops/v3 v3.13.1
 	github.com/k3d-io/k3d/v5 v5.9.0
 	github.com/mittwald/go-helm-client v0.13.2

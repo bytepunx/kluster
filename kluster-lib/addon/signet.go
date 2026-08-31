@@ -161,8 +161,18 @@ cockroachdb:
 # listener off loopback, adds an "admin" port to the chart's own Service,
 # and opens its own NetworkPolicy ingress rule -- replacing kluster's old
 # hand-rolled second Service/NetworkPolicy (bytepunx/kluster#20).
+#
+# admin.tls.acknowledgeInsecure: the chart now refuses to install with
+# clusterAccess enabled and TLS disabled, since the admin bearer token
+# would cross the pod network in cleartext (bytepunx/signet#24). This is
+# a disposable local dev cluster with no untrusted pods sharing the
+# network, matching every other insecure-by-design default in this same
+# values block (CockroachDB, the master key's own posture) -- not a
+# production configuration.
 admin:
   clusterAccess: true
+  tls:
+    acknowledgeInsecure: true
 `, trustDomain, auditChainKey, dbConnString, signetSpireSocketPath,
 		signetSpireSocketHostPath, signetMasterKeySecret)
 }

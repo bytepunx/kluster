@@ -10,7 +10,7 @@ require (
 	github.com/getsops/sops/v3 v3.13.3
 	github.com/k3d-io/k3d/v5 v5.9.0
 	github.com/mittwald/go-helm-client v0.13.2
-	github.com/sirupsen/logrus v1.9.4
+	github.com/sirupsen/logrus v1.10.2
 	golang.org/x/crypto v0.55.0
 	google.golang.org/grpc v1.82.1
 	gopkg.in/yaml.v3 v3.0.1
@@ -251,7 +251,7 @@ require (
 	go.opentelemetry.io/proto/otlp v1.10.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.4 // indirect
-	go.yaml.in/yaml/v3 v3.0.4 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	go4.org/netipx v0.0.0-20231129151722-fdeea329fbba // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect

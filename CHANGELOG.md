@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/bytepunx/kluster/compare/v1.2.1...v1.3.0) (2026-09-01)
+
+
+### Features
+
+* **authstar:** deploy AuthStar's own 8 services as part of the authstar profile ([#46](https://github.com/bytepunx/kluster/issues/46)) ([c766c74](https://github.com/bytepunx/kluster/commit/c766c742cd049ae73a11a9f16171f25080fb6c72))
+
 ## [1.2.1](https://github.com/bytepunx/kluster/compare/v1.2.0...v1.2.1) (2026-08-31)
 
 

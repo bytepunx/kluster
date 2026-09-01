@@ -2,14 +2,15 @@ package cmd
 
 import (
 	"fmt"
+	"os"
 
 	"github.com/bytepunx/kluster-lib/cluster"
+	klusterprofile "github.com/bytepunx/kluster-lib/profile"
 	"github.com/bytepunx/kluster-lib/provider"
 	"github.com/spf13/cobra"
 
 	// Trigger init() registrations in every addon and profile.
 	_ "github.com/bytepunx/kluster-lib/addon"
-	_ "github.com/bytepunx/kluster-lib/profile"
 )
 
 var upCmd = &cobra.Command{
@@ -55,5 +56,17 @@ func runUp(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	r.Done(name)
+
+	// Only the authstar profile writes this file (tower/herald's operator
+	// bearer tokens — see profile.AuthStarTokensPath's own doc comment for
+	// why these specifically have no other recoverable copy). Checking for
+	// the file rather than the --profile flag value covers `--addon`-style
+	// composition too, without this command needing to know which profiles
+	// generate credentials.
+	if tokensPath, err := klusterprofile.AuthStarTokensPath(name); err == nil {
+		if _, statErr := os.Stat(tokensPath); statErr == nil {
+			fmt.Fprintf(cmd.OutOrStdout(), "AuthStar operator tokens written to %s\n", tokensPath)
+		}
+	}
 	return nil
 }

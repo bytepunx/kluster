@@ -41,9 +41,16 @@ func (*AuthStarProfile) Addons() []string {
 // earlier, inside the "rabbitmq" addon's own Install() (see
 // addon/rabbitmq.go), since kluster generates that credential and there's
 // no reason to thread it back out to this layer.
+//
+// configureAuthStarServices (authstar_services.go) runs after RabbitMQ
+// provisioning specifically because it reads back the amqp:// URL that
+// step's own RabbitMQ credential produces — see readRabbitMQAMQPURL.
 func (*AuthStarProfile) Configure(ctx context.Context, h addon.ClusterHandle, cfg provider.ClusterConfig) error {
 	if err := configureRabbitMQProvisioning(ctx, h, cfg); err != nil {
 		return fmt.Errorf("authstar: rabbitmq provisioning: %w", err)
+	}
+	if err := configureAuthStarServices(ctx, h, cfg); err != nil {
+		return fmt.Errorf("authstar: services: %w", err)
 	}
 	return nil
 }

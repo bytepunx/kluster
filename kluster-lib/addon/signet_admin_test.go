@@ -346,3 +346,145 @@ func TestPushSignetSecret_SurfacesSyncErrors(t *testing.T) {
 		t.Errorf("error %q does not contain the server-reported sync error", err.Error())
 	}
 }
+
+func TestTarGzMultiFile(t *testing.T) {
+	files := map[string][]byte{
+		"secrets/authstar/tower/dbConnectionString.yaml": []byte("value: encrypted-a\n"),
+		"config/authstar/tower.yaml":                     []byte("baseDomain: authstar.app\n"),
+	}
+
+	archive, err := tarGzMultiFile(files)
+	if err != nil {
+		t.Fatalf("tarGzMultiFile: %v", err)
+	}
+
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	tr := tar.NewReader(gz)
+
+	got := map[string]string{}
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar.Next: %v", err)
+		}
+		content, err := io.ReadAll(tr)
+		if err != nil {
+			t.Fatalf("read tar entry %q: %v", hdr.Name, err)
+		}
+		got[hdr.Name] = string(content)
+	}
+
+	for name, want := range files {
+		if got[name] != string(want) {
+			t.Errorf("entry %q = %q, want %q", name, got[name], want)
+		}
+	}
+	if len(got) != len(files) {
+		t.Errorf("archive has %d entries, want %d", len(got), len(files))
+	}
+}
+
+// TestPushSignetBundle_SecretsAndConfigTogether is the round-trip test for
+// the first real use of SyncBundleHeader.ConfigPath in this codebase: a
+// single SyncBundle call carrying both SOPS-encrypted secrets and one plain
+// config document, which the server extracts from the same archive. This
+// exists specifically to catch a wiring mistake in that new path (wrong
+// config file naming, ConfigPath left unset when config is present, etc.)
+// before it's only discoverable against a real cluster.
+func TestPushSignetBundle_SecretsAndConfigTogether(t *testing.T) {
+	id := generateAgeIdentity(t)
+	srv := &fakeGitOpsServer{publicKey: id.Recipient().String()}
+	tl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s := grpc.NewServer()
+	adminv1.RegisterGitOpsServiceServer(s, srv)
+	go func() { _ = s.Serve(tl) }()
+	t.Cleanup(s.Stop)
+
+	const namespace = "authstar"
+	const service = "tower"
+	secrets := map[string]string{
+		"dbConnectionString": "postgres://postgres:postgres@postgresql.postgres.svc.cluster.local:5432/tower",
+		"operatorToken":      "dev-operator-token",
+	}
+	config := []byte("provisioning:\n  baseDomain: authstar.app\n")
+
+	if err := pushSignetBundle(context.Background(), tl.Addr().String(), "test-token", namespace, service, secrets, config); err != nil {
+		t.Fatalf("pushSignetBundle: %v", err)
+	}
+
+	if srv.gotHeader.GetConfigPath() != "config/" {
+		t.Errorf("ConfigPath = %q, want %q", srv.gotHeader.GetConfigPath(), "config/")
+	}
+	if srv.gotHeader.GetSecretsPath() != "secrets/" {
+		t.Errorf("SecretsPath = %q, want %q", srv.gotHeader.GetSecretsPath(), "secrets/")
+	}
+
+	gz, err := gzip.NewReader(bytes.NewReader(srv.gotArchive))
+	if err != nil {
+		t.Fatalf("gzip.NewReader: %v", err)
+	}
+	tr := tar.NewReader(gz)
+	names := map[string]bool{}
+	var configEntry []byte
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("tar.Next: %v", err)
+		}
+		names[hdr.Name] = true
+		if hdr.Name == "config/authstar/tower.yaml" {
+			configEntry, err = io.ReadAll(tr)
+			if err != nil {
+				t.Fatalf("read config entry: %v", err)
+			}
+		}
+	}
+
+	for name := range secrets {
+		want := "secrets/" + namespace + "/" + service + "/" + name + ".yaml"
+		if !names[want] {
+			t.Errorf("archive missing secret entry %q; got entries %v", want, names)
+		}
+	}
+	if !names["config/authstar/tower.yaml"] {
+		t.Errorf("archive missing config entry config/authstar/tower.yaml; got entries %v", names)
+	}
+	if string(configEntry) != string(config) {
+		t.Errorf("config entry content = %q, want %q (config must be plain, not SOPS-encrypted)", configEntry, config)
+	}
+}
+
+func TestPushSignetBundle_SecretsOnlyLeavesConfigPathUnset(t *testing.T) {
+	id := generateAgeIdentity(t)
+	srv := &fakeGitOpsServer{publicKey: id.Recipient().String()}
+	tl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s := grpc.NewServer()
+	adminv1.RegisterGitOpsServiceServer(s, srv)
+	go func() { _ = s.Serve(tl) }()
+	t.Cleanup(s.Stop)
+
+	err = pushSignetBundle(context.Background(), tl.Addr().String(), "test-token", "authstar", "herald",
+		map[string]string{"operatorToken": "dev-operator-token"}, nil)
+	if err != nil {
+		t.Fatalf("pushSignetBundle: %v", err)
+	}
+
+	if got := srv.gotHeader.GetConfigPath(); got != "" {
+		t.Errorf("ConfigPath = %q, want empty (no config document was pushed)", got)
+	}
+}

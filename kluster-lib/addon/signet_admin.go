@@ -308,19 +308,29 @@ func sopsEncryptValue(plaintext, ageRecipient string) ([]byte, error) {
 }
 
 // tarGzSingleFile builds an in-memory tar.gz archive containing exactly one
-// file, matching the shape SyncBundle expects (see bundle_cmd.go's
-// bundlePushCmd for the reference archive-building sequence this mirrors).
+// file. Thin wrapper over tarGzMultiFile for the common single-file case.
 func tarGzSingleFile(name string, content []byte) ([]byte, error) {
+	return tarGzMultiFile(map[string][]byte{name: content})
+}
+
+// tarGzMultiFile builds an in-memory tar.gz archive containing one entry per
+// files map key, matching the shape SyncBundle expects (see bundle_cmd.go's
+// bundlePushCmd for the reference archive-building sequence this mirrors).
+// Used by pushSignetBundle to carry a service's secrets and its single plain
+// config document in one SyncBundle call.
+func tarGzMultiFile(files map[string][]byte) ([]byte, error) {
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	tw := tar.NewWriter(gz)
 
-	hdr := &tar.Header{Name: name, Mode: 0o600, Size: int64(len(content))}
-	if err := tw.WriteHeader(hdr); err != nil {
-		return nil, fmt.Errorf("tar header: %w", err)
-	}
-	if _, err := tw.Write(content); err != nil {
-		return nil, fmt.Errorf("tar write: %w", err)
+	for name, content := range files {
+		hdr := &tar.Header{Name: name, Mode: 0o600, Size: int64(len(content))}
+		if err := tw.WriteHeader(hdr); err != nil {
+			return nil, fmt.Errorf("tar header for %s: %w", name, err)
+		}
+		if _, err := tw.Write(content); err != nil {
+			return nil, fmt.Errorf("tar write for %s: %w", name, err)
+		}
 	}
 	if err := tw.Close(); err != nil {
 		return nil, fmt.Errorf("finalize tar: %w", err)
@@ -363,13 +373,35 @@ func ensureSOPSPublicKey(ctx context.Context, client adminv1.GitOpsServiceClient
 	return rotateResp.GetNewPublicKey(), nil
 }
 
-// pushSignetSecret dials signet's admin API (already tunneled to addr by
-// withSignetAdminPortForward), fetches the active SOPS age public key,
-// encrypts value, and syncs it to
-// secrets/<namespace>/<service>/<secretName>.yaml via the SyncBundle RPC —
-// the same RPC and directory convention "signet bundle push" and every
-// GitOps-synced secret in this ecosystem already use.
+// pushSignetSecret dials signet's admin API and pushes a single secret
+// value. Thin wrapper over pushSignetBundle for the common single-secret,
+// no-config case.
 func pushSignetSecret(ctx context.Context, addr, token, namespace, service, secretName, value string) error {
+	return pushSignetBundle(ctx, addr, token, namespace, service, map[string]string{secretName: value}, nil)
+}
+
+// pushSignetBundle dials signet's admin API (already tunneled to addr by
+// withSignetAdminPortForward), fetches the active SOPS age public key, and
+// syncs secrets and/or a plain config document for namespace/service in a
+// single SyncBundle call — the same RPC and directory conventions "signet
+// bundle push" and every GitOps-synced secret/config in this ecosystem
+// already use.
+//
+// Each secrets entry is individually SOPS-encrypted into
+// secrets/<namespace>/<service>/<key>.yaml. config, when non-nil, is added
+// as ONE plain (unencrypted) entry at config/<namespace>/<service>.yaml —
+// exactly two path components after the config root, per signet's own
+// ParseConfigPath convention (one shallower than the three-component
+// secrets path, since a service has many secrets but at most one config
+// document). SyncBundleHeader.ConfigPath is left unset when config is nil:
+// unlike SecretsPath (which defaults to "secrets/" when empty), an empty
+// ConfigPath tells signet to skip the config sync pass entirely — setting
+// it unconditionally would make every secret-only push also attempt (and,
+// for a nonexistent config/ prefix in the archive, harmlessly no-op) a
+// config sync, which is needless but not why this is written this way:
+// being explicit about "no config" vs "trivially empty config" avoids ever
+// relying on that no-op behavior being the same across signet versions.
+func pushSignetBundle(ctx context.Context, addr, token, namespace, service string, secrets map[string]string, config []byte) error {
 	conn, err := grpc.NewClient(addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithPerRPCCredentials(bearerPerRPCCreds{token: token}),
@@ -381,20 +413,27 @@ func pushSignetSecret(ctx context.Context, addr, token, namespace, service, secr
 
 	client := adminv1.NewGitOpsServiceClient(conn)
 
-	publicKey, err := ensureSOPSPublicKey(ctx, client)
-	if err != nil {
-		return fmt.Errorf("ensure sops public key: %w", err)
+	var publicKey string
+	if len(secrets) > 0 {
+		publicKey, err = ensureSOPSPublicKey(ctx, client)
+		if err != nil {
+			return fmt.Errorf("ensure sops public key: %w", err)
+		}
 	}
 
-	encrypted, err := sopsEncryptValue(value, publicKey)
-	if err != nil {
-		return fmt.Errorf("sops-encrypt secret: %w", err)
+	files := make(map[string][]byte, len(secrets)+1)
+	for name, value := range secrets {
+		encrypted, err := sopsEncryptValue(value, publicKey)
+		if err != nil {
+			return fmt.Errorf("sops-encrypt secret %q: %w", name, err)
+		}
+		files[fmt.Sprintf("secrets/%s/%s/%s.yaml", namespace, service, name)] = encrypted
+	}
+	if config != nil {
+		files[fmt.Sprintf("config/%s/%s.yaml", namespace, service)] = config
 	}
 
-	archive, err := tarGzSingleFile(
-		fmt.Sprintf("secrets/%s/%s/%s.yaml", namespace, service, secretName),
-		encrypted,
-	)
+	archive, err := tarGzMultiFile(files)
 	if err != nil {
 		return fmt.Errorf("build bundle archive: %w", err)
 	}
@@ -404,10 +443,12 @@ func pushSignetSecret(ctx context.Context, addr, token, namespace, service, secr
 		return fmt.Errorf("open SyncBundle stream: %w", err)
 	}
 
+	header := &adminv1.SyncBundleHeader{SecretsPath: "secrets/"}
+	if config != nil {
+		header.ConfigPath = "config/"
+	}
 	if err := stream.Send(&adminv1.SyncBundleChunk{
-		Payload: &adminv1.SyncBundleChunk_Header{
-			Header: &adminv1.SyncBundleHeader{SecretsPath: "secrets/"},
-		},
+		Payload: &adminv1.SyncBundleChunk_Header{Header: header},
 	}); err != nil {
 		return fmt.Errorf("send SyncBundle header: %w", err)
 	}
@@ -432,7 +473,7 @@ func pushSignetSecret(ctx context.Context, addr, token, namespace, service, secr
 		return fmt.Errorf("SyncBundle: %w", err)
 	}
 	if len(resp.GetErrors()) > 0 {
-		return fmt.Errorf("SyncBundle reported errors for %s/%s/%s: %v", namespace, service, secretName, resp.GetErrors())
+		return fmt.Errorf("SyncBundle reported errors for %s/%s: %v", namespace, service, resp.GetErrors())
 	}
 	return nil
 }
@@ -465,6 +506,16 @@ func SeedSignetAdminTokenSecret(ctx context.Context, h ClusterHandle, namespace,
 // namespace/service must match the SPIFFE ns/sa the consuming workload
 // authenticates as, per signet's convention-first access policy.
 func SeedSignetSecret(ctx context.Context, h ClusterHandle, namespace, service, secretName, value string) error {
+	return SeedSignetBundle(ctx, h, namespace, service, map[string]string{secretName: value}, nil)
+}
+
+// SeedSignetBundle is SeedSignetSecret generalized to push multiple secrets
+// and/or one plain config document for namespace/service in a single call —
+// used by addons/profiles that need to seed a full signet bundle (e.g. an
+// AuthStar service's secrets plus its config document) ahead of that
+// workload starting up, rather than one secret at a time. See
+// pushSignetBundle's doc comment for the exact archive/path shape.
+func SeedSignetBundle(ctx context.Context, h ClusterHandle, namespace, service string, secrets map[string]string, config []byte) error {
 	if err := ensureSignetAdminRBAC(ctx, h); err != nil {
 		return fmt.Errorf("ensure signet admin RBAC: %w", err)
 	}
@@ -483,11 +534,11 @@ func SeedSignetSecret(ctx context.Context, h ClusterHandle, namespace, service, 
 			time.Sleep(3 * time.Second)
 		}
 		lastErr = withSignetAdminPortForward(ctx, h, func(addr string) error {
-			return pushSignetSecret(ctx, addr, token, namespace, service, secretName, value)
+			return pushSignetBundle(ctx, addr, token, namespace, service, secrets, config)
 		})
 		if lastErr == nil {
 			return nil
 		}
 	}
-	return fmt.Errorf("seed signet secret %s/%s/%s: %w", namespace, service, secretName, lastErr)
+	return fmt.Errorf("seed signet bundle %s/%s: %w", namespace, service, lastErr)
 }

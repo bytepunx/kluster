@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.1](https://github.com/bytepunx/kluster/compare/v1.3.0...v1.3.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **authstar:** follow ADR 0103's SPIFFE-scoped signet writes, retire admin tokens ([#48](https://github.com/bytepunx/kluster/issues/48)) ([718d4d1](https://github.com/bytepunx/kluster/commit/718d4d1fb2ae812baf8722db959f47e848c3a78b))
+
 ## [1.3.0](https://github.com/bytepunx/kluster/compare/v1.2.1...v1.3.0) (2026-09-01)
 
 

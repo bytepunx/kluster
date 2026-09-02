@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"strings"
@@ -486,5 +487,106 @@ func TestPushSignetBundle_SecretsOnlyLeavesConfigPathUnset(t *testing.T) {
 
 	if got := srv.gotHeader.GetConfigPath(); got != "" {
 		t.Errorf("ConfigPath = %q, want empty (no config document was pushed)", got)
+	}
+}
+
+// fakeAdminServer implements just enough of adminv1.AdminServiceServer to
+// drive createSignetPolicy's dedup-then-create flow.
+type fakeAdminServer struct {
+	adminv1.UnimplementedAdminServiceServer
+
+	mu       sync.Mutex
+	policies []*adminv1.PolicyInfo
+	creates  int
+}
+
+func (f *fakeAdminServer) ListPolicies(_ context.Context, _ *adminv1.ListPoliciesRequest) (*adminv1.ListPoliciesResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return &adminv1.ListPoliciesResponse{Policies: f.policies}, nil
+}
+
+func (f *fakeAdminServer) CreatePolicy(_ context.Context, req *adminv1.CreatePolicyRequest) (*adminv1.CreatePolicyResponse, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.creates++
+	f.policies = append(f.policies, &adminv1.PolicyInfo{
+		SpiffeId:    req.GetSpiffeId(),
+		Namespace:   req.GetNamespace(),
+		Pattern:     fmt.Sprintf("%s/%s/*", req.GetNamespace(), req.GetService()),
+		Permissions: req.GetPermissions(),
+	})
+	return &adminv1.CreatePolicyResponse{Id: fmt.Sprintf("policy-%d", f.creates)}, nil
+}
+
+func startFakeAdminServer(t *testing.T, srv *fakeAdminServer) string {
+	t.Helper()
+	tl, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	s := grpc.NewServer()
+	adminv1.RegisterAdminServiceServer(s, srv)
+	go func() { _ = s.Serve(tl) }()
+	t.Cleanup(s.Stop)
+	return tl.Addr().String()
+}
+
+func TestCreateSignetPolicy_CreatesWhenAbsent(t *testing.T) {
+	srv := &fakeAdminServer{}
+	addr := startFakeAdminServer(t, srv)
+
+	const spiffeID = "spiffe://dev.cluster.local/ns/authstar/sa/herald"
+	if err := createSignetPolicy(context.Background(), addr, "test-token", spiffeID, "authstar", "tower", []string{"put"}); err != nil {
+		t.Fatalf("createSignetPolicy: %v", err)
+	}
+
+	if srv.creates != 1 {
+		t.Fatalf("creates = %d, want 1", srv.creates)
+	}
+	got := srv.policies[0]
+	if got.GetSpiffeId() != spiffeID || got.GetPattern() != "authstar/tower/*" {
+		t.Errorf("created policy = %+v, want spiffeID=%q pattern=authstar/tower/*", got, spiffeID)
+	}
+	if len(got.GetPermissions()) != 1 || got.GetPermissions()[0] != "put" {
+		t.Errorf("permissions = %v, want [put]", got.GetPermissions())
+	}
+}
+
+func TestCreateSignetPolicy_SkipsWhenAlreadyExists(t *testing.T) {
+	const spiffeID = "spiffe://dev.cluster.local/ns/authstar/sa/herald"
+	srv := &fakeAdminServer{
+		policies: []*adminv1.PolicyInfo{
+			{SpiffeId: spiffeID, Namespace: "authstar", Pattern: "authstar/tower/*", Permissions: []string{"put"}},
+		},
+	}
+	addr := startFakeAdminServer(t, srv)
+
+	if err := createSignetPolicy(context.Background(), addr, "test-token", spiffeID, "authstar", "tower", []string{"put"}); err != nil {
+		t.Fatalf("createSignetPolicy: %v", err)
+	}
+
+	if srv.creates != 0 {
+		t.Errorf("creates = %d, want 0 (policy already existed)", srv.creates)
+	}
+}
+
+func TestCreateSignetPolicy_DistinguishesByPattern(t *testing.T) {
+	const spiffeID = "spiffe://dev.cluster.local/ns/authstar/sa/herald"
+	srv := &fakeAdminServer{
+		policies: []*adminv1.PolicyInfo{
+			{SpiffeId: spiffeID, Namespace: "authstar", Pattern: "authstar/tower/*", Permissions: []string{"put"}},
+		},
+	}
+	addr := startFakeAdminServer(t, srv)
+
+	// Same spiffeID, different target service -- must still create a
+	// separate grant, not be treated as a duplicate of the tower one.
+	if err := createSignetPolicy(context.Background(), addr, "test-token", spiffeID, "authstar", "keep", []string{"put"}); err != nil {
+		t.Fatalf("createSignetPolicy: %v", err)
+	}
+
+	if srv.creates != 1 {
+		t.Errorf("creates = %d, want 1 (distinct target service)", srv.creates)
 	}
 }

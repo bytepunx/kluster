@@ -58,9 +58,6 @@ const (
 	// SPIFFE trust domain, and not user-configurable today; matches
 	// authstar-integration's own committed dev config exactly.
 	authStarBaseDomain = "authstar.app"
-
-	authStarSignetAdminTokenSecret     = "signetAdminToken"
-	authStarSignetAdminTokenTTLSeconds = 24 * 60 * 60 // matches rabbitmqProvisionerAdminTokenTTLSeconds's own reasoning
 )
 
 // authStarServiceNames lists every AuthStar service deployed here, used to
@@ -94,6 +91,10 @@ func configureAuthStarServices(ctx context.Context, h addon.ClusterHandle, cfg p
 	towerOperatorToken, heraldOperatorToken, err := seedAuthStarBundles(ctx, h, amqpURL)
 	if err != nil {
 		return err
+	}
+
+	if err := ensureAuthStarCrossServicePolicies(ctx, h, trustDomain); err != nil {
+		return fmt.Errorf("cross-service policies: %w", err)
 	}
 
 	if err := deployAuthStarServices(ctx, h, trustDomain, amqpURL); err != nil {
@@ -178,12 +179,6 @@ func authStarDBConnectionString(db string) string {
 // env vars instead, in deployAuthStarServices, matching what's actually
 // exercised today.
 func seedAuthStarBundles(ctx context.Context, h addon.ClusterHandle, amqpURL string) (towerOperatorToken, heraldOperatorToken string, err error) {
-	for _, svc := range []string{"tower", "keep", "herald"} {
-		if err := addon.SeedSignetAdminTokenSecret(ctx, h, authStarNamespace, svc, authStarSignetAdminTokenSecret, authStarSignetAdminTokenTTLSeconds); err != nil {
-			return "", "", fmt.Errorf("seed %s signet admin token: %w", svc, err)
-		}
-	}
-
 	contactHashPepper, err := randomHexKey(32)
 	if err != nil {
 		return "", "", fmt.Errorf("generate tower contactHashPepper: %w", err)
@@ -204,7 +199,12 @@ func seedAuthStarBundles(ctx context.Context, h addon.ClusterHandle, amqpURL str
 				"name":         "dex",
 				"clientId":     "authstar",
 				"discoveryUrl": authStarDexDiscoveryURL,
-				"scope":        "openid email",
+				// Must be an array -- tower's resolveProvisioningConfig
+				// gates on Array.isArray(scope), rejecting a
+				// space-separated string as "missing" even though
+				// authstar-integration's own committed tower.yaml still
+				// uses the (now-stale) string form.
+				"scope": []string{"openid", "email"},
 			},
 		},
 	})
@@ -235,9 +235,18 @@ func seedAuthStarBundles(ctx context.Context, h addon.ClusterHandle, amqpURL str
 	if err != nil {
 		return "", "", fmt.Errorf("marshal towerBaseUrl config: %w", err)
 	}
+	// credentialSalt: required (requireBundleSecret, no fallback) as of
+	// keep's current image -- replaces an earlier hardcoded dev-default
+	// salt in keep's own hash.ts (the "left as a follow-up" per-credential
+	// random salting ADR 0079 flagged has now landed).
+	credentialSalt, err := randomHexKey(32)
+	if err != nil {
+		return "", "", fmt.Errorf("generate keep credentialSalt: %w", err)
+	}
 	if err := addon.SeedSignetBundle(ctx, h, authStarNamespace, "keep", map[string]string{
 		"dbConnectionString":         authStarDBConnectionString("keep"),
 		"rabbitmqUrl":                amqpURL,
+		"credentialSalt":             credentialSalt,
 		"stripe-secret-key-acme":     "sk_test_51PlaceholderAcmeDevKeyDoNotUseInProd00000000",
 		"stripe-webhook-secret-acme": "whsec_PlaceholderAcmeDevWebhookSigningSecret0000",
 	}, towerBaseURLConfig); err != nil {
@@ -282,6 +291,53 @@ func seedAuthStarBundles(ctx context.Context, h addon.ClusterHandle, amqpURL str
 	}
 
 	return towerOperatorToken, heraldOperatorToken, nil
+}
+
+// authStarPolicyGrant is one ADR 0103 cross-service write grant: sourceService
+// (identified by its own SPIFFE identity) is authorized to write into
+// targetService's bundle.
+type authStarPolicyGrant struct {
+	sourceService string
+	targetService string
+}
+
+// authStarCrossServicePolicyGrants are the four grants authstar-integration's
+// own provision.sh provisions (see its "ADR 0103 cross-service policy
+// grants" step): herald pushes its payload-encryption public key into
+// tower's, keep's, and portcullis's bundles; tower authors portcullis's
+// bundle on its behalf. signet's convention-first auto-access rule only
+// covers a caller writing to its OWN namespace/service, so each of these
+// needs an explicit grant. keep needs none — it only ever writes its own
+// bundle.
+var authStarCrossServicePolicyGrants = []authStarPolicyGrant{
+	{sourceService: "herald", targetService: "tower"},
+	{sourceService: "herald", targetService: "keep"},
+	{sourceService: "herald", targetService: "portcullis"},
+	{sourceService: "tower", targetService: "portcullis"},
+}
+
+// ensureAuthStarCrossServicePolicies grants each authStarCrossServicePolicyGrants
+// entry "put" access on the target service's bundle, ahead of any pod
+// starting — must run before deployAuthStarServices, since herald/tower may
+// attempt these writes as soon as their own process starts.
+//
+// This — not a bearer signetAdminToken — is how tower/keep/herald now
+// authenticate their own signet writes: their own SPIFFE workload identity,
+// presented on the same mTLS connection used to fetch their own bundle. See
+// ADR 0103 ("spiffe-scoped-signet-writes-retire-admin-tokens") in
+// authstar-design; signetAdminToken is retired entirely as of the images
+// this deploys — kluster no longer seeds one (compare with earlier kluster
+// versions, which minted a signetAdminToken via
+// addon.SeedSignetAdminTokenSecret for each of tower/keep/herald; that
+// secret is simply unused by the currently-published images now).
+func ensureAuthStarCrossServicePolicies(ctx context.Context, h addon.ClusterHandle, trustDomain string) error {
+	for _, grant := range authStarCrossServicePolicyGrants {
+		spiffeID := fmt.Sprintf("spiffe://%s/ns/%s/sa/%s", trustDomain, authStarNamespace, grant.sourceService)
+		if err := addon.EnsureSignetPolicy(ctx, h, spiffeID, authStarNamespace, grant.targetService, []string{"put"}); err != nil {
+			return fmt.Errorf("grant %s -> %s: %w", grant.sourceService, grant.targetService, err)
+		}
+	}
+	return nil
 }
 
 // portcullisConfigDoc mirrors config/authstar/portcullis.yaml exactly,
@@ -607,7 +663,10 @@ func deployAuthStarServices(ctx context.Context, h addon.ClusterHandle, trustDom
 		},
 		{
 			Name: "keep", Image: "docker.io/bytepunx/authstar-keep:latest", Port: 8080, ServiceAccount: "keep",
-			Env:          signetEnvVars(trustDomain, false),
+			// admin=true here: keep's own signet-admin wiring also calls
+			// signet's GitOpsService on the admin port (8444), not the
+			// workload port (8443) getServiceBundle uses.
+			Env:          signetEnvVars(trustDomain, true),
 			Volumes:      []corev1.Volume{spiffeCSIVolume()},
 			VolumeMounts: []corev1.VolumeMount{spiffeCSIVolumeMount()},
 		},

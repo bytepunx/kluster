@@ -542,3 +542,79 @@ func SeedSignetBundle(ctx context.Context, h ClusterHandle, namespace, service s
 	}
 	return fmt.Errorf("seed signet bundle %s/%s: %w", namespace, service, lastErr)
 }
+
+// createSignetPolicy grants spiffeID the given permissions on
+// namespace/service/* via signet's admin AdminService.CreatePolicy RPC —
+// distinct from GitOpsServiceClient (used by pushSignetBundle above), but
+// reachable over the same admin port/connection. Used for ADR 0103's
+// cross-service write grants: signet's convention-first auto-access rule
+// only covers a caller writing to its OWN namespace/service, so a workload
+// writing into a DIFFERENT service's bundle (e.g. herald pushing its
+// payload public key into tower's) needs an explicit policy.
+//
+// CreatePolicy has no server-side dedup (a plain SQL INSERT, per
+// authstar-integration's own provision.sh comment on this exact call) —
+// unlike pushSignetBundle's upsert-shaped SyncBundle, calling this
+// unconditionally on every `kluster up` would pile up duplicate policy
+// rows. ListPolicies first and skip any (spiffeID, pattern) pair that
+// already exists, matching provision.sh's own idempotent style.
+func createSignetPolicy(ctx context.Context, addr, token, spiffeID, namespace, service string, permissions []string) error {
+	conn, err := grpc.NewClient(addr,
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithPerRPCCredentials(bearerPerRPCCreds{token: token}),
+	)
+	if err != nil {
+		return fmt.Errorf("dial signet admin API: %w", err)
+	}
+	defer conn.Close()
+
+	client := adminv1.NewAdminServiceClient(conn)
+
+	pattern := fmt.Sprintf("%s/%s/*", namespace, service)
+	existing, err := client.ListPolicies(ctx, &adminv1.ListPoliciesRequest{})
+	if err != nil {
+		return fmt.Errorf("list policies: %w", err)
+	}
+	for _, p := range existing.GetPolicies() {
+		if p.GetSpiffeId() == spiffeID && p.GetPattern() == pattern {
+			return nil
+		}
+	}
+
+	if _, err := client.CreatePolicy(ctx, &adminv1.CreatePolicyRequest{
+		SpiffeId:    spiffeID,
+		Namespace:   namespace,
+		Service:     service,
+		Permissions: permissions,
+	}); err != nil {
+		return fmt.Errorf("create policy %s -> %s: %w", spiffeID, pattern, err)
+	}
+	return nil
+}
+
+// EnsureSignetPolicy grants spiffeID the given permissions on
+// namespace/service/* — see createSignetPolicy's doc comment for when this
+// is needed (a workload writing into a bundle that isn't its own).
+func EnsureSignetPolicy(ctx context.Context, h ClusterHandle, spiffeID, namespace, service string, permissions []string) error {
+	if err := ensureSignetAdminRBAC(ctx, h); err != nil {
+		return fmt.Errorf("ensure signet admin RBAC: %w", err)
+	}
+	token, err := mintSignetAdminToken(ctx, h)
+	if err != nil {
+		return fmt.Errorf("mint signet admin token: %w", err)
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if attempt > 0 {
+			time.Sleep(3 * time.Second)
+		}
+		lastErr = withSignetAdminPortForward(ctx, h, func(addr string) error {
+			return createSignetPolicy(ctx, addr, token, spiffeID, namespace, service, permissions)
+		})
+		if lastErr == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("ensure signet policy %s -> %s/%s: %w", spiffeID, namespace, service, lastErr)
+}

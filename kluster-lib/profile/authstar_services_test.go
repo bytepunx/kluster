@@ -301,3 +301,29 @@ func TestWriteAuthStarTokens_RoundTrips(t *testing.T) {
 		t.Errorf("round-tripped tokens = %v, want %v", got, tokens)
 	}
 }
+
+// TestAuthStarCrossServicePolicyGrants pins the exact ADR 0103 grant list —
+// easy to get subtly wrong (missing entry, swapped source/target, an extra
+// grant keep doesn't need) with no compiler check to catch it.
+func TestAuthStarCrossServicePolicyGrants(t *testing.T) {
+	want := []authStarPolicyGrant{
+		{sourceService: "herald", targetService: "tower"},
+		{sourceService: "herald", targetService: "keep"},
+		{sourceService: "herald", targetService: "portcullis"},
+		{sourceService: "tower", targetService: "portcullis"},
+	}
+	if len(authStarCrossServicePolicyGrants) != len(want) {
+		t.Fatalf("grant count = %d, want %d: %+v", len(authStarCrossServicePolicyGrants), len(want), authStarCrossServicePolicyGrants)
+	}
+	for i, g := range want {
+		if authStarCrossServicePolicyGrants[i] != g {
+			t.Errorf("grant[%d] = %+v, want %+v", i, authStarCrossServicePolicyGrants[i], g)
+		}
+	}
+	// keep must never appear as a source: it only ever writes its own bundle.
+	for _, g := range authStarCrossServicePolicyGrants {
+		if g.sourceService == "keep" {
+			t.Errorf("keep should not be a policy grant source, found: %+v", g)
+		}
+	}
+}
